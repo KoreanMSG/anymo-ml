@@ -41,6 +41,41 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 models_loaded = False
 suicide_predictor = None
 
+def create_sample_csv():
+    """Create a sample CSV file if it doesn't exist"""
+    sample_file_path = os.path.join(DATA_DIR, "Suicide_Detection_sample.csv")
+    if not os.path.exists(sample_file_path):
+        logger.info("Creating sample CSV file for keyword extraction")
+        try:
+            with open(sample_file_path, 'w') as f:
+                f.write('''text,class
+"I feel so hopeless and worthless, I just want to end it all.",1
+"I can't see a reason to continue living anymore. The pain is too much.",1
+"I've been thinking about killing myself a lot lately.",1
+"Sometimes I feel like everyone would be better off if I wasn't here.",1
+"I wish I could just go to sleep and never wake up.",1
+"I'm tired of living with this pain every day.",1
+"I don't see a future for myself. I just want it to end.",1
+"There's no point in living anymore.",1
+"I've been researching ways to commit suicide.",1
+"I feel like a burden to everyone around me.",1
+"I had a great day today! Everything is going well.",0
+"Just finished a new book, it was really inspiring.",0
+"Looking forward to the weekend and seeing friends.",0
+"I'm excited about my new job opportunity.",0
+"The weather is beautiful today, perfect for a walk.",0
+"Just adopted a new puppy, so happy!",0
+"Had a wonderful dinner with my family tonight.",0
+"Working on a new project that's really challenging but fun.",0
+"I'm grateful for all the support from my friends lately.",0
+"Just got back from an amazing vacation.",0''')
+            logger.info(f"Sample CSV file created at {sample_file_path}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to create sample CSV file: {e}")
+            return False
+    return True
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan manager for the FastAPI app"""
@@ -48,6 +83,9 @@ async def lifespan(app: FastAPI):
     
     # Initialize Suicide Predictor
     suicide_predictor = SuicidePredictor(model_path=os.path.join(MODELS_DIR, 'suicide_model.joblib'))
+    
+    # Ensure sample CSV exists
+    create_sample_csv()
     
     # CSV 기반 키워드 추출 - 모델은 필요시에만 로드
     extract_data_dir = os.path.join(DATA_DIR, "Suicide_Detection_sample.csv")
@@ -237,13 +275,13 @@ def analyze_text(text_input: TextInput):
 def _convert_risk_level(level):
     """위험도 레벨 변환 함수"""
     if level == "high":
-        return RiskLevel.HIGH_RISK
+        return RiskLevel.HIGH_RISK.value
     elif level == "medium":
-        return RiskLevel.MEDIUM_RISK
+        return RiskLevel.MEDIUM_RISK.value
     elif level == "low":
-        return RiskLevel.LOW_RISK
+        return RiskLevel.LOW_RISK.value
     else:
-        return RiskLevel.NO_RISK
+        return RiskLevel.NO_RISK.value
 
 # 모델 학습 엔드포인트
 @app.post("/train")
