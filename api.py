@@ -5,9 +5,21 @@ from fastapi import FastAPI, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Enum
 from dotenv import load_dotenv
 import traceback
+import time
+from datetime import datetime
+
+# Import SuicidePredictor
+from suicide_predictor import SuicidePredictor
+
+# Define RiskLevel enum
+class RiskLevel(str, Enum):
+    HIGH_RISK = "high_risk"
+    MEDIUM_RISK = "medium_risk"
+    LOW_RISK = "low_risk"
+    NO_RISK = "no_risk"
 
 # 환경 설정
 load_dotenv()
@@ -64,29 +76,32 @@ class FullAnalysisResult(BaseModel):
     sentiment_analysis: SentimentAnalysisResult
     final_risk_score: int = Field(..., description="최종 위험도 점수 (1-100)")
 
+# Initialize model on-demand rather than auto-loading
+models_loaded = False
+
+# Initialize Suicide Predictor
+suicide_predictor = SuicidePredictor(model_path=os.path.join(MODELS_DIR, 'suicide_model.joblib'))
+
+@app.on_event("startup")
+async def startup_event():
+    """Startup event handler - DON'T automatically load models to save memory"""
+    global models_loaded
+    # CSV 기반 키워드 추출 - 모델은 필요시에만 로드
+    extract_data_dir = os.path.join(DATA_DIR, "Suicide_Detection_sample.csv")
+    if os.path.exists(extract_data_dir):
+        logger.info("CSV 데이터에서 키워드 추출 시작")
+        suicide_predictor.extract_keywords_from_csv(extract_data_dir)
+    else:
+        logger.warning("키워드 추출용 CSV 파일이 없습니다. 기본 키워드를 사용합니다.")
+        
+    # Flag that startup completed
+    models_loaded = True
+    logger.info("API startup completed. Models will be loaded on demand.")
+
 # 루트 엔드포인트 (미리 정의하여 초기 연결 테스트를 위함)
 @app.get("/")
 def read_root():
     return {"message": "자살 위험도 분석 API"}
-
-# 이제 모듈 불러오기 (오류가 나더라도 앱은 실행될 수 있게)
-try:
-    from conversation_processor import ConversationProcessor
-    from suicide_predictor import SuicidePredictor
-    from sentiment_analyzer import SentimentAnalyzer
-
-    # 모델 인스턴스 초기화
-    conversation_processor = ConversationProcessor()
-    suicide_predictor = SuicidePredictor(model_path=os.path.join(MODELS_DIR, 'suicide_model.joblib'))
-    sentiment_analyzer = SentimentAnalyzer()
-    
-    models_loaded = True
-    logger.info("All models loaded successfully")
-    
-except Exception as e:
-    logger.error(f"Error loading models: {e}")
-    logger.error(traceback.format_exc())
-    models_loaded = False
 
 # 에러 처리 미들웨어
 @app.middleware("http")
@@ -163,88 +178,44 @@ def analyze_sentiment(text_input: TextInput):
 @app.post("/analyze", response_model=FullAnalysisResult)
 def analyze_text(text_input: TextInput):
     if not models_loaded:
-        raise HTTPException(status_code=503, detail="Models not loaded")
+        raise HTTPException(status_code=503, detail="API initializing, please try again in a moment")
     
     try:
-        # 1. 대화 처리
-        conversation_result = conversation_processor.process_conversation(text_input.text)
+        # 1. 자살 위험도 분석 (키워드 기반으로 먼저 시도)
+        start_time = time.time()
+        result = suicide_predictor.predict(text_input.text)
         
-        # 2. 모델이 로드되어 있는지 확인
-        if suicide_predictor.model is None:
-            # 파일 우선순위: 1. 환경변수 2. 샘플 파일 3. 압축 파일 4. 전체 파일
-            csv_path = os.getenv("CSV_PATH")
-            sample_csv_path = os.path.join(DATA_DIR, "Suicide_Detection_sample.csv")
-            compressed_csv_path = os.path.join(DATA_DIR, "Suicide_Detection.csv.gz")
-            full_csv_path = os.path.join(DATA_DIR, "Suicide_Detection.csv")
-            
-            # 환경 변수로 설정된 경로 확인
-            if csv_path and os.path.exists(csv_path):
-                logger.info(f"Using CSV file from environment variable: {csv_path}")
-                suicide_predictor.train(csv_path)
-            # 샘플 파일 확인
-            elif os.path.exists(sample_csv_path):
-                logger.info(f"Using sample CSV file: {sample_csv_path}")
-                suicide_predictor.train(sample_csv_path)
-            # 압축 파일 확인
-            elif os.path.exists(compressed_csv_path):
-                logger.info(f"Using compressed CSV file: {compressed_csv_path}")
-                import gzip
-                import pandas as pd
-                # 압축 파일 읽기
-                with gzip.open(compressed_csv_path, 'rt') as f:
-                    df = pd.read_csv(f)
-                # 임시 파일로 저장
-                temp_csv_path = os.path.join(DATA_DIR, 'temp_data.csv')
-                df.to_csv(temp_csv_path, index=False)
-                # 모델 학습
-                suicide_predictor.train(temp_csv_path)
-                # 임시 파일 삭제
-                if os.path.exists(temp_csv_path):
-                    os.remove(temp_csv_path)
-            # 전체 파일 확인
-            elif os.path.exists(full_csv_path):
-                logger.info(f"Using full CSV file: {full_csv_path}")
-                suicide_predictor.train(full_csv_path)
-            else:
-                logger.error("No suicide detection CSV file found")
-                # 모델 없이 계속 진행
+        # 위험도 레벨 변환
+        risk_level = _convert_risk_level(result["risk_level"])
         
-        # 3. 자살 위험도 예측
-        ml_result = {}
-        if suicide_predictor.model is not None:
-            ml_result = suicide_predictor.predict(text_input.text)
-        else:
-            # 모델이 없으면 기본값 사용
-            ml_result = {
-                "risk_score": 0,
-                "is_suicide_risk": False,
-                "raw_probability": 0.0
-            }
-        
-        # 4. 감정 분석
-        sentiment_result = sentiment_analyzer.analyze_suicide_sentiment(text_input.text)
-        
-        # 5. 최종 위험도 계산 (ML 예측과 감정 분석의 평균)
-        ml_score = ml_result.get("risk_score", 0)
-        sentiment_score = sentiment_result.get("risk_score", 0)
-        
-        # 가중치 적용: ML 모델 60%, 감정 분석 40%
-        final_risk_score = int(ml_score * 0.6 + sentiment_score * 0.4)
-        
-        return {
-            "conversation": conversation_result,
-            "ml_prediction": {
-                "risk_score": ml_result.get("risk_score", 0),
-                "is_suicide_risk": ml_result.get("is_suicide_risk", False),
-                "confidence": ml_result.get("raw_probability", 0.0)
-            },
-            "sentiment_analysis": sentiment_result,
-            "final_risk_score": final_risk_score
+        # 분석 결과 생성
+        analysis_result = {
+            "risk_score": result["risk_score"],
+            "risk_level": risk_level,
+            "ml_confidence": 0.0,  # 키워드 기반이므로 0
+            "keywords_found": [kw["word"] for kw in result["keywords_found"]],
+            "analysis_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "method": "keyword",
+            "emotion": "unknown",
+            "is_conversation": False,
+            "processing_time_ms": int((time.time() - start_time) * 1000)
         }
+        
+        return analysis_result
     except Exception as e:
-        logger.error(f"Error in full analysis: {e}")
-        logger.error(traceback.format_exc())
+        logger.error(f"분석 오류: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+def _convert_risk_level(level):
+    """위험도 레벨 변환 함수"""
+    if level == "high":
+        return RiskLevel.HIGH_RISK
+    elif level == "medium":
+        return RiskLevel.MEDIUM_RISK
+    elif level == "low":
+        return RiskLevel.LOW_RISK
+    else:
+        return RiskLevel.NO_RISK
 
 # 모델 학습 엔드포인트
 @app.post("/train")
