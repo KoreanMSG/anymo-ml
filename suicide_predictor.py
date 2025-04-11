@@ -139,8 +139,14 @@ class SuicidePredictor:
             bool: 추출 성공 여부
         """
         try:
-            # CSV 파일 로드
-            df = pd.read_csv(csv_path)
+            # CSV 파일 로드 (on_bad_lines='skip' to handle parsing errors)
+            try:
+                df = pd.read_csv(csv_path, on_bad_lines='skip')
+                logger.info(f"Successfully loaded CSV file with {len(df)} rows after skipping bad lines")
+            except TypeError:
+                # Fallback for older pandas versions that don't support on_bad_lines
+                df = pd.read_csv(csv_path, error_bad_lines=False)
+                logger.info(f"Successfully loaded CSV file with {len(df)} rows after skipping bad lines")
             
             # 최소 2개 이상의 열이 있는지 확인 (텍스트, 라벨)
             if len(df.columns) < 2:
@@ -153,13 +159,27 @@ class SuicidePredictor:
             label_col = df.columns[1]
             
             # 라벨이 1인 텍스트만 선택 (자살 관련 텍스트)
-            suicide_texts = df[df[label_col] == 1][text_col].astype(str).tolist()
-            non_suicide_texts = df[df[label_col] == 0][text_col].astype(str).tolist()
+            # Handle different label formats (1, '1', 'yes', etc.)
+            suicide_texts = []
+            non_suicide_texts = []
+            
+            # Check if label is numeric
+            if pd.api.types.is_numeric_dtype(df[label_col]):
+                suicide_texts = df[df[label_col] == 1][text_col].astype(str).tolist()
+                non_suicide_texts = df[df[label_col] == 0][text_col].astype(str).tolist()
+            else:
+                # For string labels
+                suicide_keywords = ['suicide', 'suicidal', 'yes', 'positive', '1', 'true']
+                suicide_mask = df[label_col].astype(str).apply(lambda x: x.lower() in suicide_keywords)
+                suicide_texts = df[suicide_mask][text_col].astype(str).tolist()
+                non_suicide_texts = df[~suicide_mask][text_col].astype(str).tolist()
             
             if len(suicide_texts) == 0:
                 logger.warning("자살 관련 텍스트가 없습니다. 기본 키워드를 사용합니다.")
                 self._set_default_keywords()
                 return False
+            
+            logger.info(f"Found {len(suicide_texts)} suicide-related texts and {len(non_suicide_texts)} non-suicide texts")
             
             # TF-IDF 벡터라이저 적용
             tfidf = TfidfVectorizer(max_features=200, stop_words='english', ngram_range=(1, 2))
@@ -253,8 +273,14 @@ class SuicidePredictor:
             # 키워드 먼저 추출
             self.extract_keywords_from_csv(csv_path)
             
-            # 데이터 로드
-            df = pd.read_csv(csv_path)
+            # 데이터 로드 (with error handling)
+            try:
+                df = pd.read_csv(csv_path, on_bad_lines='skip')
+                logger.info(f"For training, loaded CSV with {len(df)} rows after skipping bad lines")
+            except TypeError:
+                # Fallback for older pandas versions
+                df = pd.read_csv(csv_path, error_bad_lines=False)
+                logger.info(f"For training, loaded CSV with {len(df)} rows after skipping bad lines")
             
             # 데이터 구조 확인
             if len(df.columns) >= 2:
@@ -265,7 +291,7 @@ class SuicidePredictor:
                 X = df[text_column].fillna('')
                 
                 # 라벨 변환 (필요한 경우)
-                if df[label_column].dtype == 'object':
+                if not pd.api.types.is_numeric_dtype(df[label_column]):
                     suicide_keywords = ['suicide', 'suicidal', 'yes', 'positive', '1', 'true']
                     y = df[label_column].apply(
                         lambda x: 1 if str(x).lower() in suicide_keywords else 0
@@ -281,13 +307,13 @@ class SuicidePredictor:
                 self.model = LogisticRegression(C=1.0, max_iter=200)
                 self.model.fit(X_transformed, y)
                 
-                print(f"모델 학습 완료")
+                logger.info(f"모델 학습 완료: {len(X)} 샘플, 양성 샘플 {sum(y)} 개")
                 return True
             else:
-                print(f"CSV 파일 형식이 올바르지 않음: {csv_path}")
+                logger.error(f"CSV 파일 형식이 올바르지 않음: {csv_path}")
                 return False
         except Exception as e:
-            print(f"학습 실패: {e}")
+            logger.error(f"학습 실패: {e}")
             return False
     
     def train(self, csv_path, test_size=0.2, random_state=42):
@@ -295,7 +321,13 @@ class SuicidePredictor:
         try:
             # 데이터 로드
             logger.info(f"Loading data from {csv_path}")
-            df = pd.read_csv(csv_path)
+            try:
+                df = pd.read_csv(csv_path, on_bad_lines='skip')
+                logger.info(f"Loaded CSV with {len(df)} rows after skipping bad lines")
+            except TypeError:
+                # Fallback for older pandas versions
+                df = pd.read_csv(csv_path, error_bad_lines=False)
+                logger.info(f"Loaded CSV with {len(df)} rows after skipping bad lines")
             
             # 필요한 열만 선택 (텍스트와 라벨)
             # 주의: CSV 파일의 실제 열 이름에 맞게 조정 필요
@@ -318,7 +350,7 @@ class SuicidePredictor:
             
             # 라벨 변환 (필요한 경우)
             # 예: 'suicide' -> 1, 'non-suicide' -> 0
-            if df[label_column].dtype == 'object':
+            if not pd.api.types.is_numeric_dtype(df[label_column]):
                 unique_labels = df[label_column].unique()
                 if len(unique_labels) == 2:
                     # 라벨이 이미 바이너리인 경우
@@ -335,6 +367,13 @@ class SuicidePredictor:
                         logger.info(f"Converted labels: {df[label_column].value_counts().to_dict()}")
                 else:
                     logger.warning(f"Found {len(unique_labels)} unique labels, expected 2")
+                    # Handle multi-class by converting to binary
+                    suicide_keywords = ['suicide', 'suicidal', 'yes', 'positive', '1', 'true']
+                    df['label'] = df[label_column].apply(
+                        lambda x: 1 if str(x).lower() in suicide_keywords else 0
+                    )
+                    label_column = 'label'
+                    logger.info(f"Converted multiple labels to binary: {df[label_column].value_counts().to_dict()}")
             
             # 데이터 분할
             X_train, X_test, y_train, y_test = train_test_split(
