@@ -62,6 +62,12 @@ class SuicidePredictor:
     def __init__(self, model_path='models/suicide_model.joblib'):
         self.model_path = model_path
         self.model = None
+        self.vectorizer = None
+        self.keywords = {
+            "high": [],
+            "medium": [],
+            "low": []
+        }
         
         try:
             self.lemmatizer = WordNetLemmatizer()
@@ -100,6 +106,124 @@ class SuicidePredictor:
             if word.isalnum() and word not in self.stop_words
         ]
         return ' '.join(filtered_tokens)
+    
+    def extract_keywords_from_csv(self, csv_path):
+        """CSV 데이터에서 자살 관련 키워드를 추출하는 함수"""
+        try:
+            # CSV 읽기
+            df = pd.read_csv(csv_path)
+            
+            # 데이터 구조 확인
+            if len(df.columns) >= 2:
+                text_column = df.columns[0] if df.columns[0] != '' else df.columns[1]
+                label_column = df.columns[1]
+                
+                # 자살 관련 텍스트 분리
+                suicide_texts = []
+                
+                if df[label_column].dtype == 'object':
+                    suicide_keywords = ['suicide', 'suicidal', 'yes', 'positive', '1', 'true']
+                    suicide_mask = df[label_column].apply(
+                        lambda x: 1 if str(x).lower() in suicide_keywords else 0
+                    ).astype(bool)
+                else:
+                    suicide_mask = df[label_column].astype(bool)
+                
+                suicide_texts = df.loc[suicide_mask, text_column].tolist()
+                
+                # TF-IDF를 사용하여 주요 키워드 추출
+                tfidf = TfidfVectorizer(max_features=300, stop_words='english')
+                tfidf_matrix = tfidf.fit_transform(suicide_texts)
+                
+                # 주요 단어 추출
+                feature_names = tfidf.get_feature_names_out()
+                
+                # 점수 기반 정렬 및 상위 키워드 선택
+                tfidf_sum = tfidf_matrix.sum(axis=0).A1
+                word_scores = [(word, score) for word, score in zip(feature_names, tfidf_sum)]
+                word_scores.sort(key=lambda x: x[1], reverse=True)
+                
+                # 점수 기반으로 키워드 분류
+                total_words = len(word_scores)
+                high_threshold = int(total_words * 0.2)  # 상위 20%
+                medium_threshold = int(total_words * 0.5)  # 상위 50%
+                
+                self.keywords["high"] = [word for word, _ in word_scores[:high_threshold] if len(word) > 2]
+                self.keywords["medium"] = [word for word, _ in word_scores[high_threshold:medium_threshold] if len(word) > 2]
+                self.keywords["low"] = [word for word, _ in word_scores[medium_threshold:] if len(word) > 2]
+                
+                # 기본 중요 키워드 추가 (다른 언어 포함)
+                self.keywords["high"].extend(["자살", "죽고 싶", "suicide", "kill myself"])
+                self.keywords["medium"].extend(["우울", "희망이 없", "삶이 의미", "살아갈 이유", "혼자", "외롭", "고통", "hopeless", "worthless", "alone", "lonely", "pain", "suffering", "depressed"])
+                self.keywords["low"].extend(["슬프", "힘들", "지쳤", "피곤", "실패", "포기", "도움", "sad", "tired", "exhausted", "failed", "give up", "help me"])
+                
+                print(f"CSV에서 키워드 추출 완료: {len(self.keywords['high'])} high, {len(self.keywords['medium'])} medium, {len(self.keywords['low'])} low")
+            else:
+                print(f"CSV에 충분한 열이 없음: {csv_path}")
+                self._set_default_keywords()
+        except Exception as e:
+            print(f"키워드 추출 실패: {e}")
+            self._set_default_keywords()
+    
+    def _set_default_keywords(self):
+        """기본 키워드 설정"""
+        self.keywords = {
+            "high": [
+                "자살", "죽고 싶", "목숨", "목맬", "목을 매", "죽어버리", "없어지고 싶", "사라지고 싶", 
+                "suicide", "kill myself", "end my life", "take my life"
+            ],
+            "medium": [
+                "우울", "희망이 없", "삶이 의미", "살아갈 이유", "혼자", "외롭", "고통", 
+                "hopeless", "worthless", "alone", "lonely", "pain", "suffering", "depressed"
+            ],
+            "low": [
+                "슬프", "힘들", "지쳤", "피곤", "실패", "포기", "도움", 
+                "sad", "tired", "exhausted", "failed", "give up", "help me"
+            ]
+        }
+
+    def train_from_csv(self, csv_path):
+        """CSV 데이터로부터 모델 학습"""
+        try:
+            # 키워드 먼저 추출
+            self.extract_keywords_from_csv(csv_path)
+            
+            # 데이터 로드
+            df = pd.read_csv(csv_path)
+            
+            # 데이터 구조 확인
+            if len(df.columns) >= 2:
+                text_column = df.columns[0] if df.columns[0] != '' else df.columns[1]
+                label_column = df.columns[1]
+                
+                # 데이터 준비
+                X = df[text_column].fillna('')
+                
+                # 라벨 변환 (필요한 경우)
+                if df[label_column].dtype == 'object':
+                    suicide_keywords = ['suicide', 'suicidal', 'yes', 'positive', '1', 'true']
+                    y = df[label_column].apply(
+                        lambda x: 1 if str(x).lower() in suicide_keywords else 0
+                    )
+                else:
+                    y = df[label_column]
+                
+                # 데이터 전처리 및 학습
+                self.vectorizer = TfidfVectorizer(max_features=5000)
+                X_transformed = self.vectorizer.fit_transform(X)
+                
+                # 모델 학습
+                self.model = LogisticRegression(C=1.0, max_iter=200)
+                self.model.fit(X_transformed, y)
+                
+                print(f"모델 학습 완료")
+                return True
+            else:
+                print(f"CSV 파일 형식이 올바르지 않음: {csv_path}")
+                return False
+        except Exception as e:
+            print(f"학습 실패: {e}")
+            return False
     
     def train(self, csv_path, test_size=0.2, random_state=42):
         """CSV 파일로부터 자살 예측 모델 학습"""
@@ -190,27 +314,88 @@ class SuicidePredictor:
             raise
     
     def predict(self, text):
-        """텍스트에서 자살 위험도 예측"""
-        if self.model is None:
-            raise ValueError("Model not loaded. Please train or load a model first.")
-            
-        # 텍스트 전처리
+        """텍스트의 자살 위험도 예측"""
+        if not text:
+            return {"risk_level": "unknown", "risk_score": 0, "keywords_found": []}
+        
+        # 확률 계산을 위한 예측
         processed_text = self.preprocess_text(text)
         
-        # 예측 확률 반환
-        proba = self.model.predict_proba([processed_text])[0]
+        if self.model and self.vectorizer:
+            # 모델이 로드된 경우 머신러닝 예측 사용
+            X = self.vectorizer.transform([processed_text])
+            probability = self.model.predict_proba(X)[0][1]
+            
+            # 예측 결과 해석
+            risk_score = probability * 100
+        else:
+            # 모델이 없는 경우 키워드 기반 분석
+            # 자살 위험도 키워드 검사 (기본 단어 기반)
+            risk_score = self._calculate_keyword_risk(processed_text)
         
-        # 1이 자살 위험이 있는 클래스라고 가정
-        suicide_prob = proba[1]
+        # 결과 해석
+        risk_level = self._interpret_risk_score(risk_score)
         
-        # 위험도 점수 계산 (1-100 범위)
-        risk_score = int(suicide_prob * 100)
+        # 발견된 키워드 목록
+        keywords_found = self._find_keywords_in_text(processed_text)
         
         return {
-            'risk_score': risk_score,
-            'is_suicide_risk': risk_score > 50,
-            'raw_probability': float(suicide_prob)
+            "risk_level": risk_level,
+            "risk_score": round(risk_score, 2),
+            "keywords_found": keywords_found
         }
+    
+    def _calculate_keyword_risk(self, text):
+        """키워드 기반 위험도 계산"""
+        text_lower = text.lower()
+        
+        # 키워드 가중치
+        weights = {"high": 0.7, "medium": 0.2, "low": 0.1}
+        
+        high_count = sum(1 for word in self.keywords["high"] if word.lower() in text_lower)
+        medium_count = sum(1 for word in self.keywords["medium"] if word.lower() in text_lower)
+        low_count = sum(1 for word in self.keywords["low"] if word.lower() in text_lower)
+        
+        # 위험도 점수 계산 (100점 만점)
+        total_score = 0
+        
+        if high_count > 0:
+            total_score += min(high_count * 30, 70)  # 최대 70점
+        
+        if medium_count > 0:
+            total_score += min(medium_count * 7, 20)  # 최대 20점
+        
+        if low_count > 0:
+            total_score += min(low_count * 3, 10)  # 최대 10점
+        
+        return min(total_score, 100)  # 최대 100점
+    
+    def _find_keywords_in_text(self, text):
+        """텍스트에서 발견된 키워드 목록 반환"""
+        text_lower = text.lower()
+        found_keywords = []
+        
+        # 모든 카테고리의 키워드 검사
+        for category in ["high", "medium", "low"]:
+            for keyword in self.keywords[category]:
+                if keyword.lower() in text_lower:
+                    found_keywords.append({
+                        "word": keyword,
+                        "category": category
+                    })
+        
+        return found_keywords
+    
+    def _interpret_risk_score(self, score):
+        """위험도 점수 해석"""
+        if score >= 70:
+            return "high"
+        elif score >= 30:
+            return "medium"
+        elif score >= 10:
+            return "low"
+        else:
+            return "none"
 
 # 테스트 코드
 if __name__ == "__main__":
@@ -242,13 +427,13 @@ if __name__ == "__main__":
         
         # csv_path가 있으면 경로로 학습, 없으면 df로 학습
         if csv_path:
-            predictor.train(csv_path)
+            predictor.train_from_csv(csv_path)
         else:
             # train 메소드를 DataFrame을 직접 받을 수 있도록 수정 필요
             # 임시로 DataFrame을 CSV로 저장하고 사용
             temp_csv_path = 'temp_data.csv'
             df.to_csv(temp_csv_path, index=False)
-            predictor.train(temp_csv_path)
+            predictor.train_from_csv(temp_csv_path)
             # 임시 파일 삭제
             if os.path.exists(temp_csv_path):
                 os.remove(temp_csv_path)
@@ -256,6 +441,6 @@ if __name__ == "__main__":
     # 테스트 텍스트로 예측
     test_text = "I don't want to live anymore. Everything feels so hopeless."
     result = predictor.predict(test_text)
+    print(f"Risk level: {result['risk_level']}")
     print(f"Risk score: {result['risk_score']}")
-    print(f"Is suicide risk: {result['is_suicide_risk']}")
-    print(f"Raw probability: {result['raw_probability']:.4f}") 
+    print(f"Keywords found: {result['keywords_found']}") 

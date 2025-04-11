@@ -68,22 +68,91 @@ class AnalysisResult(BaseModel):
 
 # 자살 관련 키워드 (한국어와 영어) - 키워드 매칭용
 SUICIDE_KEYWORDS = {
-    "high": [
-        "자살", "죽고 싶", "목숨", "목맬", "목을 매", "죽어버리", "없어지고 싶", "사라지고 싶", 
-        "suicide", "kill myself", "end my life", "take my life", "don't want to live",
-        "better off dead", "cannot go on", "방법"
-    ],
-    "medium": [
-        "우울", "희망이 없", "삶이 의미", "살아갈 이유", "혼자", "외롭", "고통", "아파", 
-        "hopeless", "worthless", "alone", "lonely", "pain", "suffering", "depressed",
-        "depression", "pills", "overdose", "goodbye", "farewell"
-    ],
-    "low": [
-        "슬프", "힘들", "지쳤", "피곤", "실패", "포기", "도움", "아무도 몰라", 
-        "sad", "tired", "exhausted", "failed", "give up", "help me", "nobody understands",
-        "crying", "tears", "hate myself"
-    ]
+    "high": [],
+    "medium": [],
+    "low": []
 }
+
+# CSV에서 키워드 추출 함수
+def extract_keywords_from_csv():
+    """CSV 데이터에서 자살 관련 키워드를 추출하는 함수"""
+    global SUICIDE_KEYWORDS
+    
+    csv_path = os.getenv("CSV_PATH", os.path.join(DATA_DIR, "Suicide_Detection_sample.csv"))
+    if not os.path.exists(csv_path):
+        logger.warning(f"키워드 추출을 위한 CSV 파일이 없음: {csv_path}")
+        # 기본 키워드 설정
+        SUICIDE_KEYWORDS = {
+            "high": [
+                "자살", "죽고 싶", "목숨", "목맬", "목을 매", "죽어버리", "없어지고 싶", "사라지고 싶", 
+                "suicide", "kill myself", "end my life", "take my life"
+            ],
+            "medium": [
+                "우울", "희망이 없", "삶이 의미", "살아갈 이유", "혼자", "외롭", "고통", 
+                "hopeless", "worthless", "alone", "lonely", "pain", "suffering", "depressed"
+            ],
+            "low": [
+                "슬프", "힘들", "지쳤", "피곤", "실패", "포기", "도움", 
+                "sad", "tired", "exhausted", "failed", "give up", "help me"
+            ]
+        }
+        return
+    
+    try:
+        # CSV 읽기
+        df = pd.read_csv(csv_path)
+        
+        # 데이터 구조 확인
+        if len(df.columns) >= 2:
+            text_column = df.columns[0] if df.columns[0] != '' else df.columns[1]
+            label_column = df.columns[1]
+            
+            # 자살 관련 텍스트 분리
+            suicide_texts = []
+            non_suicide_texts = []
+            
+            if df[label_column].dtype == 'object':
+                suicide_keywords = ['suicide', 'suicidal', 'yes', 'positive', '1', 'true']
+                suicide_mask = df[label_column].apply(
+                    lambda x: 1 if str(x).lower() in suicide_keywords else 0
+                ).astype(bool)
+            else:
+                suicide_mask = df[label_column].astype(bool)
+            
+            suicide_texts = df.loc[suicide_mask, text_column].tolist()
+            non_suicide_texts = df.loc[~suicide_mask, text_column].tolist()
+            
+            # TF-IDF를 사용하여 주요 키워드 추출
+            tfidf = TfidfVectorizer(max_features=300, stop_words='english')
+            tfidf_matrix = tfidf.fit_transform(suicide_texts)
+            
+            # 주요 단어 추출
+            feature_names = tfidf.get_feature_names_out()
+            
+            # 점수 기반 정렬 및 상위 키워드 선택
+            tfidf_sum = tfidf_matrix.sum(axis=0).A1
+            word_scores = [(word, score) for word, score in zip(feature_names, tfidf_sum)]
+            word_scores.sort(key=lambda x: x[1], reverse=True)
+            
+            # 점수 기반으로 키워드 분류
+            total_words = len(word_scores)
+            high_threshold = int(total_words * 0.2)  # 상위 20%
+            medium_threshold = int(total_words * 0.5)  # 상위 50%
+            
+            SUICIDE_KEYWORDS["high"] = [word for word, _ in word_scores[:high_threshold] if len(word) > 2]
+            SUICIDE_KEYWORDS["medium"] = [word for word, _ in word_scores[high_threshold:medium_threshold] if len(word) > 2]
+            SUICIDE_KEYWORDS["low"] = [word for word, _ in word_scores[medium_threshold:] if len(word) > 2]
+            
+            logger.info(f"CSV에서 키워드 추출 완료: {len(SUICIDE_KEYWORDS['high'])} high, {len(SUICIDE_KEYWORDS['medium'])} medium, {len(SUICIDE_KEYWORDS['low'])} low")
+            
+            # 기본 중요 키워드 추가 (다른 언어 포함)
+            SUICIDE_KEYWORDS["high"].extend(["자살", "죽고 싶", "suicide", "kill myself"])
+            SUICIDE_KEYWORDS["medium"].extend(["우울", "희망이 없", "혼자", "외롭", "hopeless", "worthless"])
+            SUICIDE_KEYWORDS["low"].extend(["슬프", "힘들", "지쳤", "sad", "tired"])
+        else:
+            logger.error(f"CSV에 충분한 열이 없음: {csv_path}")
+    except Exception as e:
+        logger.error(f"키워드 추출 실패: {e}")
 
 # 텍스트 전처리 함수
 def preprocess_text(text):
@@ -162,6 +231,9 @@ def load_ml_model():
             ml_model = joblib.load(model_path)
             ml_model_loaded = True
             logger.info(f"ML 모델 로드됨: {model_path}")
+            
+            # 키워드도 함께 추출
+            extract_keywords_from_csv()
             return True
         except Exception as e:
             logger.error(f"모델 로드 실패: {e}")
@@ -174,9 +246,12 @@ def load_ml_model():
             logger.info(f"CSV 데이터에서 모델 학습 시작: {csv_path}")
             df = pd.read_csv(csv_path)
             
+            # 키워드 추출
+            extract_keywords_from_csv()
+            
             # 데이터 구조 추측 (첫 두 열을 텍스트와 라벨로 가정)
             if len(df.columns) >= 2:
-                text_column = df.columns[0]
+                text_column = df.columns[0] if df.columns[0] != '' else df.columns[1]
                 label_column = df.columns[1]
                 
                 # 데이터 준비
