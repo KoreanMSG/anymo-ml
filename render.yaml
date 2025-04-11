@@ -4,8 +4,8 @@ services:
     env: python
     region: singapore
     plan: free
-    buildCommand: pip install -r requirements.txt && mkdir -p data models
-    startCommand: python api.py
+    buildCommand: pip install fastapi uvicorn python-dotenv
+    startCommand: python api_lite.py
     envVars:
       - key: PORT
         value: 8000
