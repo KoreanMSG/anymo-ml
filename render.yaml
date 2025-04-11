@@ -4,8 +4,8 @@ services:
     env: python
     region: singapore
     plan: free
-    buildCommand: pip install fastapi uvicorn python-dotenv
-    startCommand: python api_lite.py
+    buildCommand: pip install fastapi uvicorn scikit-learn pandas joblib python-dotenv && mkdir -p data models
+    startCommand: python api_minimalml.py
     envVars:
       - key: PORT
         value: 8000
