@@ -14,6 +14,8 @@ from nltk.corpus import stopwords
 from nltk.tokenize import word_tokenize
 from nltk.stem import WordNetLemmatizer
 import re
+from enum import Enum
+from typing import Optional, List, Dict, Any
 
 # 환경 설정
 logging.basicConfig(level=logging.INFO, 

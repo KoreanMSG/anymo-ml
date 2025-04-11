@@ -5,7 +5,8 @@ from fastapi import FastAPI, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Any, Enum
+from typing import Optional, List, Dict, Any
+from enum import Enum
 from dotenv import load_dotenv
 import traceback
 import time
