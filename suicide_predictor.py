@@ -172,7 +172,19 @@ if __name__ == "__main__":
     
     # 모델이 없으면 학습
     if predictor.model is None:
-        csv_path = 'data/Suicide_Detection.csv'  # 실제 CSV 파일 경로로 변경
+        # 샘플 파일이 있는지 확인하고, 없으면 전체 파일 사용
+        sample_csv_path = 'Suicide_Detection_sample.csv'
+        full_csv_path = 'Suicide_Detection.csv'
+        
+        if os.path.exists(sample_csv_path):
+            logger.info(f"Using sample CSV file: {sample_csv_path}")
+            csv_path = sample_csv_path
+        elif os.path.exists(full_csv_path):
+            logger.info(f"Using full CSV file: {full_csv_path}")
+            csv_path = full_csv_path
+        else:
+            raise FileNotFoundError("No suicide detection CSV file found. Please provide either Suicide_Detection.csv or Suicide_Detection_sample.csv")
+            
         predictor.train(csv_path)
         
     # 테스트 텍스트로 예측
