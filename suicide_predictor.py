@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import logging
 import joblib
+import gzip
 from sklearn.model_selection import train_test_split
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.pipeline import Pipeline
@@ -172,20 +173,40 @@ if __name__ == "__main__":
     
     # 모델이 없으면 학습
     if predictor.model is None:
-        # 샘플 파일이 있는지 확인하고, 없으면 전체 파일 사용
+        # 파일 우선순위: 1. 샘플 파일 2. 압축 파일 3. 전체 파일
         sample_csv_path = 'Suicide_Detection_sample.csv'
+        compressed_csv_path = 'Suicide_Detection.csv.gz'
         full_csv_path = 'Suicide_Detection.csv'
         
         if os.path.exists(sample_csv_path):
             logger.info(f"Using sample CSV file: {sample_csv_path}")
             csv_path = sample_csv_path
+            df = pd.read_csv(csv_path)
+        elif os.path.exists(compressed_csv_path):
+            logger.info(f"Using compressed CSV file: {compressed_csv_path}")
+            # 압축 파일 읽기
+            with gzip.open(compressed_csv_path, 'rt') as f:
+                df = pd.read_csv(f)
+            csv_path = None  # df를 직접 전달하기 위해 경로는 None으로 설정
         elif os.path.exists(full_csv_path):
             logger.info(f"Using full CSV file: {full_csv_path}")
             csv_path = full_csv_path
+            df = pd.read_csv(csv_path)
         else:
-            raise FileNotFoundError("No suicide detection CSV file found. Please provide either Suicide_Detection.csv or Suicide_Detection_sample.csv")
-            
-        predictor.train(csv_path)
+            raise FileNotFoundError("No suicide detection CSV file found. Please provide either Suicide_Detection.csv, Suicide_Detection.csv.gz, or Suicide_Detection_sample.csv")
+        
+        # csv_path가 있으면 경로로 학습, 없으면 df로 학습
+        if csv_path:
+            predictor.train(csv_path)
+        else:
+            # train 메소드를 DataFrame을 직접 받을 수 있도록 수정 필요
+            # 임시로 DataFrame을 CSV로 저장하고 사용
+            temp_csv_path = 'temp_data.csv'
+            df.to_csv(temp_csv_path, index=False)
+            predictor.train(temp_csv_path)
+            # 임시 파일 삭제
+            if os.path.exists(temp_csv_path):
+                os.remove(temp_csv_path)
         
     # 테스트 텍스트로 예측
     test_text = "I don't want to live anymore. Everything feels so hopeless."

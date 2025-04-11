@@ -25,9 +25,16 @@ ml/
 
 1. **샘플 데이터**: `Suicide_Detection_sample.csv` 파일에 1만 라인의 샘플 데이터가 포함되어 있어 기본 테스트가 가능합니다.
 
-2. **전체 데이터 사용**: 전체 데이터셋이 필요한 경우, 다음 두 가지 방법으로 준비할 수 있습니다:
+2. **압축 데이터**: `Suicide_Detection.csv.gz`는 전체 데이터셋을 gzip으로 압축한 파일입니다. 코드는 자동으로 이 파일을 감지하고 압축을 풀어 사용할 수 있습니다.
+
+3. **전체 데이터 사용**: 전체 데이터셋(압축되지 않은)이 필요한 경우, 다음과 같이 준비할 수 있습니다:
    - 팀 구성원에게 전체 데이터셋 요청하기
-   - 또는 `Suicide_Detection_sample.csv`를 기반으로 테스트 진행하기
+   - 압축 파일 풀기: `gzip -d Suicide_Detection.csv.gz`
+
+실행 시 코드는 다음 우선순위로 데이터 파일을 찾습니다:
+1. Suicide_Detection_sample.csv (샘플 데이터)
+2. Suicide_Detection.csv.gz (압축된 전체 데이터)
+3. Suicide_Detection.csv (압축되지 않은 전체 데이터)
 
 ## 기능
 
