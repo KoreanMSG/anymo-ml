@@ -240,7 +240,9 @@ def train_model(csv_path: str = Body(..., embed=True)):
 def start_server():
     """API 서버 실행"""
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run("api:app", host="0.0.0.0", port=port)
+    # 명시적으로 log_level을 설정하고 다른 방식으로 Uvicorn 실행
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 if __name__ == "__main__":
     start_server() 
