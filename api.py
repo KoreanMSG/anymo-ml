@@ -139,12 +139,42 @@ def analyze_text(text_input: TextInput):
         
         # 2. 모델이 로드되어 있는지 확인
         if suicide_predictor.model is None:
-            # CSV 파일로부터 모델 학습
-            csv_path = os.getenv("CSV_PATH", os.path.join(DATA_DIR, "Suicide_Detection.csv"))
-            if os.path.exists(csv_path):
+            # 파일 우선순위: 1. 환경변수 2. 샘플 파일 3. 압축 파일 4. 전체 파일
+            csv_path = os.getenv("CSV_PATH")
+            sample_csv_path = os.path.join(DATA_DIR, "Suicide_Detection_sample.csv")
+            compressed_csv_path = os.path.join(DATA_DIR, "Suicide_Detection.csv.gz")
+            full_csv_path = os.path.join(DATA_DIR, "Suicide_Detection.csv")
+            
+            # 환경 변수로 설정된 경로 확인
+            if csv_path and os.path.exists(csv_path):
+                logger.info(f"Using CSV file from environment variable: {csv_path}")
                 suicide_predictor.train(csv_path)
+            # 샘플 파일 확인
+            elif os.path.exists(sample_csv_path):
+                logger.info(f"Using sample CSV file: {sample_csv_path}")
+                suicide_predictor.train(sample_csv_path)
+            # 압축 파일 확인
+            elif os.path.exists(compressed_csv_path):
+                logger.info(f"Using compressed CSV file: {compressed_csv_path}")
+                import gzip
+                import pandas as pd
+                # 압축 파일 읽기
+                with gzip.open(compressed_csv_path, 'rt') as f:
+                    df = pd.read_csv(f)
+                # 임시 파일로 저장
+                temp_csv_path = os.path.join(DATA_DIR, 'temp_data.csv')
+                df.to_csv(temp_csv_path, index=False)
+                # 모델 학습
+                suicide_predictor.train(temp_csv_path)
+                # 임시 파일 삭제
+                if os.path.exists(temp_csv_path):
+                    os.remove(temp_csv_path)
+            # 전체 파일 확인
+            elif os.path.exists(full_csv_path):
+                logger.info(f"Using full CSV file: {full_csv_path}")
+                suicide_predictor.train(full_csv_path)
             else:
-                logger.error(f"CSV file not found: {csv_path}")
+                logger.error("No suicide detection CSV file found")
                 # 모델 없이 계속 진행
         
         # 3. 자살 위험도 예측
@@ -210,7 +240,7 @@ def train_model(csv_path: str = Body(..., embed=True)):
 def start_server():
     """API 서버 실행"""
     port = int(os.getenv("PORT", 8000))
-    uvicorn.run("api:app", host="0.0.0.0", port=port, reload=True)
+    uvicorn.run("api:app", host="0.0.0.0", port=port)
 
 if __name__ == "__main__":
     start_server() 

@@ -14,5 +14,5 @@ services:
       - key: GEMINI_API_KEY
         sync: false
       - key: CSV_PATH
-        value: data/Suicide_Detection.csv
+        value: data/Suicide_Detection_sample.csv
     autoDeploy: true 
