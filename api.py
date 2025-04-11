@@ -12,6 +12,7 @@ import traceback
 import time
 from datetime import datetime
 from contextlib import asynccontextmanager
+import sys
 
 # Import SuicidePredictor
 from suicide_predictor import SuicidePredictor
@@ -312,19 +313,27 @@ def train_model(csv_path: str = Body(..., embed=True)):
 def start_server():
     """API 서버 실행"""
     # 중요: 실행 전 로그 메시지 출력
+    port = int(os.getenv("PORT", 8000))
     logger.info("Starting server...")
-    logger.info(f"Port: {os.getenv('PORT', 8000)}")
+    logger.info(f"Port: {port}")
     logger.info(f"Current directory: {os.getcwd()}")
     
     # 직접 FastAPI 앱 전달하는 방식으로 Uvicorn 실행
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
+        port=port,
         log_level="info"
     )
 
 if __name__ == "__main__":
-    # 시작 로그 추가
-    logger.info("API script started")
-    start_server() 
+    try:
+        # 시작 로그 추가
+        logger.info("API script started")
+        logger.info(f"Python version: {sys.version}")
+        logger.info(f"Environment variables: PORT={os.getenv('PORT', 'not set')}")
+        start_server()
+    except Exception as e:
+        logger.error(f"Error starting server: {e}")
+        logger.error(traceback.format_exc())
+        sys.exit(1) 
