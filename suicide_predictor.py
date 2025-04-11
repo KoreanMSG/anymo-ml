@@ -21,18 +21,63 @@ logger = logging.getLogger(__name__)
 
 # NLTK 리소스 다운로드
 try:
-    nltk.download('punkt', quiet=True)
-    nltk.download('stopwords', quiet=True)
-    nltk.download('wordnet', quiet=True)
+    # NLTK 데이터 디렉토리 설정 (Render 환경에서 쓰기 가능한 경로로)
+    nltk_data_dir = os.path.join(os.path.dirname(__file__), 'nltk_data')
+    os.makedirs(nltk_data_dir, exist_ok=True)
+    
+    # NLTK 데이터 경로 설정
+    nltk.data.path.append(nltk_data_dir)
+    
+    # 필요한 데이터 다운로드
+    nltk.download('punkt', download_dir=nltk_data_dir, quiet=True)
+    nltk.download('stopwords', download_dir=nltk_data_dir, quiet=True)
+    nltk.download('wordnet', download_dir=nltk_data_dir, quiet=True)
+    
+    logger.info(f"NLTK resources downloaded to {nltk_data_dir}")
 except Exception as e:
     logger.warning(f"NLTK download warning: {e}")
+    # 에러가 있더라도 기본적인 처리 가능하도록 준비
+    try:
+        from nltk.tokenize import word_tokenize as _word_tokenize
+        def word_tokenize(text):
+            try:
+                return _word_tokenize(text)
+            except:
+                return text.split()
+        
+        if not hasattr(nltk, 'corpus') or not hasattr(nltk.corpus, 'stopwords') or not hasattr(nltk.corpus.stopwords, 'words'):
+            nltk.corpus.stopwords.words = lambda lang: []
+        
+        if not hasattr(nltk, 'stem') or not hasattr(nltk.stem, 'WordNetLemmatizer'):
+            class DummyLemmatizer:
+                def lemmatize(self, word):
+                    return word
+            nltk.stem.WordNetLemmatizer = DummyLemmatizer
+            
+        logger.info("Set up fallback NLTK functionality")
+    except Exception as inner_e:
+        logger.error(f"Failed to set up fallback NLTK functionality: {inner_e}")
 
 class SuicidePredictor:
     def __init__(self, model_path='models/suicide_model.joblib'):
         self.model_path = model_path
         self.model = None
-        self.lemmatizer = WordNetLemmatizer()
-        self.stop_words = set(stopwords.words('english'))
+        
+        try:
+            self.lemmatizer = WordNetLemmatizer()
+            try:
+                self.stop_words = set(stopwords.words('english'))
+            except Exception as e:
+                logger.warning(f"Could not load stopwords: {e}")
+                self.stop_words = set()
+        except Exception as e:
+            logger.warning(f"Could not initialize lemmatizer: {e}")
+            # 폴백 처리
+            class DummyLemmatizer:
+                def lemmatize(self, word):
+                    return word
+            self.lemmatizer = DummyLemmatizer()
+            self.stop_words = set()
         
         # 모델 로드 또는 생성
         if os.path.exists(model_path):
