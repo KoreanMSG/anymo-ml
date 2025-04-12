@@ -49,28 +49,31 @@ def create_sample_csv():
         logger.info("Creating sample CSV file for keyword extraction")
         try:
             with open(sample_file_path, 'w', encoding='utf-8') as f:
-                # Simple CSV format with properly escaped quotes
-                f.write('''text,class
-"I feel so hopeless and worthless I just want to end it all",1
-"I cant see a reason to continue living anymore. The pain is too much",1
-"I have been thinking about killing myself a lot lately",1
-"Sometimes I feel like everyone would be better off if I wasnt here",1
-"I wish I could just go to sleep and never wake up",1
-"I am tired of living with this pain every day",1
-"I dont see a future for myself. I just want it to end",1
-"There is no point in living anymore",1
-"I have been researching ways to commit suicide",1
-"I feel like a burden to everyone around me",1
-"I had a great day today! Everything is going well",0
-"Just finished a new book it was really inspiring",0
-"Looking forward to the weekend and seeing friends",0
-"I am excited about my new job opportunity",0
-"The weather is beautiful today perfect for a walk",0
-"Just adopted a new puppy so happy",0
-"Had a wonderful dinner with my family tonight",0
-"Working on a new project that is really challenging but fun",0
-"I am grateful for all the support from my friends lately",0
-"Just got back from an amazing vacation",0''')
+                # Simple CSV format with carefully escaped quotes - all on one line to avoid unexpected line breaks
+                f.write('text,class\n')
+                # High risk examples (class 1)
+                f.write('"I feel so hopeless and worthless I just want to end it all",1\n')
+                f.write('"I cannot see a reason to continue living anymore",1\n')
+                f.write('"I have been thinking about killing myself lately",1\n')
+                f.write('"Everyone would be better off if I was not here",1\n')
+                f.write('"I wish I could just go to sleep and never wake up",1\n')
+                f.write('"I am tired of living with this pain every day",1\n')
+                f.write('"I do not see a future for myself",1\n')
+                f.write('"There is no point in living anymore",1\n')
+                f.write('"I have been researching ways to commit suicide",1\n')
+                f.write('"I feel like a burden to everyone around me",1\n')
+                # Low risk examples (class 0)
+                f.write('"I had a great day today",0\n')
+                f.write('"Just finished a new book",0\n')
+                f.write('"Looking forward to the weekend",0\n')
+                f.write('"I am excited about my new job opportunity",0\n')
+                f.write('"The weather is beautiful today",0\n')
+                f.write('"Just adopted a new puppy",0\n')
+                f.write('"Had a wonderful dinner with family",0\n')
+                f.write('"Working on a new project",0\n')
+                f.write('"I am grateful for support from friends",0\n')
+                f.write('"Just got back from vacation",0\n')
+            
             logger.info(f"Sample CSV file created at {sample_file_path}")
             return True
         except Exception as e:
@@ -97,14 +100,26 @@ async def lifespan(app: FastAPI):
         
         # If extraction failed, recreate the CSV file and try again
         if not success:
-            logger.warning("CSV file extraction failed, creating new sample CSV file")
-            os.remove(extract_data_dir)
+            logger.warning("CSV file extraction failed, recreating sample CSV file")
+            try:
+                # Remove existing file that may be corrupted
+                os.remove(extract_data_dir)
+                logger.info("Removed potentially corrupted CSV file")
+            except Exception as e:
+                logger.error(f"Error removing CSV file: {e}")
+            
+            # Create a new sample CSV with our improved format
             create_sample_csv()
+            
             if os.path.exists(extract_data_dir):
-                logger.info("Trying extraction again with new CSV file")
-                suicide_predictor.extract_keywords_from_csv(extract_data_dir)
+                logger.info("Trying extraction again with fresh CSV file")
+                success = suicide_predictor.extract_keywords_from_csv(extract_data_dir)
+                if not success:
+                    logger.warning("Second extraction attempt failed. Using default keywords.")
+                    suicide_predictor._set_default_keywords()
     else:
         logger.warning("No CSV file for keyword extraction. Using default keywords.")
+        suicide_predictor._set_default_keywords()
         
     # Flag that startup completed
     models_loaded = True
