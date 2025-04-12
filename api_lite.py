@@ -55,15 +55,15 @@ class AnalysisResult(BaseModel):
 # Suicide-related keywords (Korean and English)
 SUICIDE_KEYWORDS = {
     "high": [
-        "자살", "죽고 싶", "목숨", "목맬", "목을 매", "죽어버리", "없어지고 싶", "사라지고 싶", 
+        "자살(suicide)", "죽고 싶다(want to die)", "목숨(life)", "목맬(hang myself)", "목을 매다(hang myself)", "죽어버리고 싶다(want to die)", "없어지고 싶다(want to disappear)", "사라지고 싶다(want to vanish)", 
         "suicide", "kill myself", "end my life", "take my life"
     ],
     "medium": [
-        "우울", "희망이 없", "삶이 의미", "살아갈 이유", "혼자", "외롭", "고통", 
+        "우울하다(depressed)", "희망이 없다(hopeless)", "삶이 의미없다(life is meaningless)", "살아갈 이유(reason to live)", "혼자(alone)", "외롭다(lonely)", "고통(pain)", 
         "hopeless", "worthless", "alone", "lonely", "pain", "suffering", "depressed"
     ],
     "low": [
-        "슬프", "힘들", "지쳤", "피곤", "실패", "포기", "도움", 
+        "슬프다(sad)", "힘들다(hard/difficult)", "지쳤다(exhausted)", "피곤하다(tired)", "실패(failure)", "포기(give up)", "도움(help)", 
         "sad", "tired", "exhausted", "failed", "give up", "help me"
     ]
 }

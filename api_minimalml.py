@@ -215,9 +215,9 @@ def analyze_text_keywords(text: str) -> Dict[str, Any]:
         "method": "keyword"
     }
 
-# ML 모델 로드 함수
+# Load ML model function
 def load_ml_model():
-    """저장된 ML 모델을 로드하거나 CSV에서 학습"""
+    """Load the saved ML model or train from CSV"""
     global ml_model, ml_model_loaded
     
     if ml_model is not None:
@@ -225,39 +225,39 @@ def load_ml_model():
     
     model_path = os.path.join(MODELS_DIR, 'suicide_model_minimal.joblib')
     
-    # 저장된 모델이 있으면 로드
+    # Load model if it exists
     if os.path.exists(model_path):
         try:
             ml_model = joblib.load(model_path)
             ml_model_loaded = True
-            logger.info(f"ML 모델 로드됨: {model_path}")
+            logger.info(f"ML model loaded: {model_path}")
             
-            # 키워드도 함께 추출
+            # Extract keywords along with model loading
             extract_keywords_from_csv()
             return True
         except Exception as e:
-            logger.error(f"모델 로드 실패: {e}")
+            logger.error(f"Failed to load model: {e}")
     
-    # 저장된 모델이 없으면 CSV에서 학습
+    # Train from CSV if no saved model exists
     csv_path = os.getenv("CSV_PATH", os.path.join(DATA_DIR, "Suicide_Detection_sample.csv"))
     if os.path.exists(csv_path):
         try:
-            # 데이터 로드
-            logger.info(f"CSV 데이터에서 모델 학습 시작: {csv_path}")
+            # Load data
+            logger.info(f"Starting model training from CSV data: {csv_path}")
             df = pd.read_csv(csv_path)
             
-            # 키워드 추출
+            # Extract keywords
             extract_keywords_from_csv()
             
-            # 데이터 구조 추측 (첫 두 열을 텍스트와 라벨로 가정)
+            # Infer data structure (assume first two columns are text and label)
             if len(df.columns) >= 2:
                 text_column = df.columns[0] if df.columns[0] != '' else df.columns[1]
                 label_column = df.columns[1]
                 
-                # 데이터 준비
+                # Prepare data
                 X = df[text_column].fillna('').apply(preprocess_text)
                 
-                # 라벨 변환 (필요한 경우)
+                # Transform labels if needed
                 if df[label_column].dtype == 'object':
                     suicide_keywords = ['suicide', 'suicidal', 'yes', 'positive', '1', 'true']
                     y = df[label_column].apply(
@@ -266,53 +266,53 @@ def load_ml_model():
                 else:
                     y = df[label_column]
                 
-                # 경량 ML 모델 생성 (메모리 효율적인 설정)
+                # Create lightweight ML model (memory-efficient settings)
                 pipeline = Pipeline([
-                    ('tfidf', TfidfVectorizer(max_features=5000)),  # 적은 특성 사용
-                    ('clf', LogisticRegression(C=1.0, solver='liblinear', max_iter=100))  # 빠른 솔버 사용
+                    ('tfidf', TfidfVectorizer(max_features=5000)),  # Use fewer features
+                    ('clf', LogisticRegression(C=1.0, solver='liblinear', max_iter=100))  # Use faster solver
                 ])
                 
-                # 모델 학습
+                # Train model
                 pipeline.fit(X, y)
                 
-                # 모델 저장
+                # Save model
                 joblib.dump(pipeline, model_path)
                 ml_model = pipeline
                 ml_model_loaded = True
-                logger.info(f"모델 학습 및 저장 완료: {model_path}")
+                logger.info(f"Model training and saving completed: {model_path}")
                 return True
             else:
-                logger.error(f"CSV에 충분한 열이 없음: {csv_path}")
+                logger.error(f"Not enough columns in CSV: {csv_path}")
         except Exception as e:
-            logger.error(f"모델 학습 실패: {e}")
+            logger.error(f"Model training failed: {e}")
     else:
-        logger.warning(f"CSV 파일을 찾을 수 없음: {csv_path}")
+        logger.warning(f"CSV file not found: {csv_path}")
     
     return False
 
-# ML 기반 분석 함수
+# ML-based analysis function
 def analyze_text_ml(text: str) -> Dict[str, Any]:
-    """ML 모델을 사용한 자살 위험도 분석"""
+    """Suicide risk analysis using ML model"""
     if not ml_model_loaded:
         if not load_ml_model():
-            # ML 모델 로드 실패 시 키워드 분석으로 폴백
+            # Fall back to keyword analysis if ML model fails to load
             result = analyze_text_keywords(text)
             return result
     
     try:
-        # 텍스트 전처리
+        # Preprocess text
         processed_text = preprocess_text(text)
         
-        # 예측 확률 반환
+        # Return prediction probability
         proba = ml_model.predict_proba([processed_text])[0]
         
-        # 1이 자살 위험이 있는 클래스라고 가정
+        # Assume class 1 indicates suicide risk
         suicide_prob = proba[1]
         
-        # 위험도 점수 계산 (1-100 범위)
+        # Calculate risk score (1-100 range)
         risk_score = int(suicide_prob * 100)
         
-        # 위험도 레벨 결정
+        # Determine risk level
         if risk_score >= 80:
             risk_level = RiskLevel.SEVERE_RISK
         elif risk_score >= 60:
@@ -324,10 +324,10 @@ def analyze_text_ml(text: str) -> Dict[str, Any]:
         else:
             risk_level = RiskLevel.NO_RISK
         
-        # 키워드 분석도 함께 진행
+        # Also perform keyword analysis
         keyword_result = analyze_text_keywords(text)
         
-        # 키워드 및 ML 결과를 결합
+        # Combine keyword and ML results
         return {
             "risk_score": risk_score,
             "risk_level": risk_level,
@@ -337,16 +337,16 @@ def analyze_text_ml(text: str) -> Dict[str, Any]:
             "method": "ml"
         }
     except Exception as e:
-        logger.error(f"ML 분석 실패: {e}, 키워드 분석으로 폴백")
-        # 실패 시 키워드 분석으로 폴백
+        logger.error(f"ML analysis failed: {e}, falling back to keyword analysis")
+        # Fall back to keyword analysis on failure
         return analyze_text_keywords(text)
 
-# 루트 엔드포인트 
+# Root endpoint
 @app.get("/")
 def read_root():
-    return {"message": "자살 위험도 분석 API - 경량 ML 버전", "status": "online"}
+    return {"message": "Suicide Risk Analysis API - Minimal ML Version", "status": "online"}
 
-# 상태 확인 엔드포인트
+# Status check endpoint
 @app.get("/status")
 def check_status():
     global ml_model_loaded
@@ -360,44 +360,44 @@ def check_status():
         "features": ["ml_analysis", "keyword_detection"]
     }
 
-# ML 모델 사전 로드 엔드포인트
+# ML model preload endpoint
 @app.post("/load-model")
 def load_model():
-    """ML 모델 명시적 로드 엔드포인트"""
+    """ML model explicit load endpoint"""
     success = load_ml_model()
     return {"success": success, "model_loaded": ml_model_loaded}
 
-# 통합 분석 엔드포인트
+# Integrated analysis endpoint
 @app.post("/analyze", response_model=AnalysisResult)
 def analyze_text(text_input: TextInput):
     try:
         if not text_input.text or len(text_input.text.strip()) < 3:
             raise HTTPException(status_code=400, detail="Text too short for analysis")
         
-        # ML 기반 분석 시도 (실패 시 키워드 분석으로 폴백)
+        # Attempt ML-based analysis (fallback to keyword analysis if fails)
         result = analyze_text_ml(text_input.text)
         return result
     except Exception as e:
-        logger.error(f"분석 오류: {e}")
+        logger.error(f"Analysis error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# 에러 처리 미들웨어
+# Error handling middleware
 @app.middleware("http")
 async def errors_handling(request: Request, call_next):
     try:
         return await call_next(request)
     except Exception as exc:
-        logger.error(f"요청 오류: {exc}")
+        logger.error(f"Request error: {exc}")
         return JSONResponse(
             status_code=500,
             content={"detail": str(exc)},
         )
 
-# 서버 시작 함수
+# Server start function
 def start_server():
-    """API 서버 실행"""
+    """Run the API server"""
     port = int(os.getenv("PORT", 8000))
-    logger.info(f"서버 시작: 포트 {port}...")
+    logger.info(f"Starting server: port {port}...")
     
     uvicorn.run(
         app,
@@ -407,5 +407,5 @@ def start_server():
     )
 
 if __name__ == "__main__":
-    logger.info("MinimalML API 시작")
+    logger.info("MinimalML API started")
     start_server() 

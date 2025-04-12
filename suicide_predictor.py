@@ -81,7 +81,7 @@ class SuicidePredictor:
                 self.stop_words = set()
         except Exception as e:
             logger.warning(f"Could not initialize lemmatizer: {e}")
-            # 폴백 처리
+            # Fallback handling
             class DummyLemmatizer:
                 def lemmatize(self, word):
                     return word
