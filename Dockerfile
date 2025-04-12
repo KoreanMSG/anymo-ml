@@ -1,30 +1,39 @@
-FROM python:3.10-slim
+FROM python:3.9-slim
 
 WORKDIR /app
 
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    software-properties-common \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better caching
 COPY requirements.txt .
+
+# Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 필요한 디렉토리 생성
-RUN mkdir -p data models
+# Copy NLTK downloader and run it
+COPY download_nltk.py .
+RUN python download_nltk.py
 
-# NLTK 리소스 다운로드
-RUN python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords'); nltk.download('wordnet')"
-
-# 파일 복사 (CSV 파일 포함)
+# Copy application code
 COPY . .
 
-# CSV 파일이 data 디렉토리에 있는지 확인하고 없으면 자동으로 이동
-RUN if [ -f "Suicide_Detection.csv" ] && [ ! -f "data/Suicide_Detection.csv" ]; then \
-    mv Suicide_Detection.csv data/; \
-    fi
+# Create necessary directories
+RUN mkdir -p data models nltk_data
 
-# 환경 변수 설정
+# Create a sample CSV if needed
+RUN if [ ! -f data/Suicide_Detection_sample.csv ]; then python -c "from api import create_sample_csv; create_sample_csv()"; fi
+
+# Set environment variables with defaults
 ENV PORT=8000
-ENV CSV_PATH=data/Suicide_Detection.csv
+ENV CHUNK_SIZE=5000
+ENV MAX_CHUNKS=20
+ENV ENVIRONMENT=production
 
-# 포트 노출
-EXPOSE 8000
-
-# 서버 실행
-CMD ["python", "api.py"] 
+# Use uvicorn directly, with a health check endpoint
+CMD exec uvicorn api:app --host 0.0.0.0 --port $PORT --timeout-keep-alive 75 

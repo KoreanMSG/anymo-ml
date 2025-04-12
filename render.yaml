@@ -4,8 +4,8 @@ services:
     env: python
     region: singapore
     plan: free
-    buildCommand: pip install fastapi uvicorn scikit-learn pandas joblib python-dotenv && mkdir -p data models
-    startCommand: python api_minimalml.py
+    buildCommand: pip install -r requirements.txt && mkdir -p data models
+    startCommand: python api.py
     envVars:
       - key: PORT
         value: 8000
@@ -15,4 +15,8 @@ services:
         sync: false
       - key: CSV_PATH
         value: data/Suicide_Detection_sample.csv
+      - key: CHUNK_SIZE
+        value: 5000
+      - key: MAX_CHUNKS
+        value: 20
     autoDeploy: true 

@@ -110,54 +110,91 @@ async def lifespan(app: FastAPI):
     
     # Initialize models and resources
     logger.info("Initializing API resources...")
+    logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
     
     # Create directories if they don't exist
-    os.makedirs(DATA_DIR, exist_ok=True)
-    os.makedirs(MODELS_DIR, exist_ok=True)
+    for directory in [DATA_DIR, MODELS_DIR]:
+        os.makedirs(directory, exist_ok=True)
+        logger.info(f"Ensured directory exists: {directory}")
     
     # Set up NLTK data directory
     nltk_data_dir = os.path.join(os.path.dirname(__file__), 'nltk_data')
     os.makedirs(nltk_data_dir, exist_ok=True)
+    logger.info(f"NLTK data directory: {nltk_data_dir}")
     
-    # Initialize models
-    suicide_predictor = SuicidePredictor(model_path=os.path.join(MODELS_DIR, 'suicide_model.joblib'))
+    # Initialize models with proper paths
+    model_path = os.path.join(MODELS_DIR, 'suicide_model.joblib')
+    logger.info(f"Using model path: {model_path}")
+    suicide_predictor = SuicidePredictor(model_path=model_path)
     sentiment_analyzer = SentimentAnalyzer()
     conversation_processor = ConversationProcessor()
     
-    # Extract data path
-    extract_data_dir = os.path.join(DATA_DIR, "Suicide_Detection_sample.csv")
+    # Extract data path from environment variable or use default
+    extract_data_dir = os.getenv("CSV_PATH", os.path.join(DATA_DIR, "Suicide_Detection_sample.csv"))
+    logger.info(f"Using CSV path: {extract_data_dir}")
     
     # Create sample data file if it doesn't exist
-    if not os.path.exists(extract_data_dir) and not create_sample_csv():
-        logger.warning("Failed to create sample CSV, using default keywords")
+    if not os.path.exists(extract_data_dir):
+        logger.info(f"CSV file doesn't exist at {extract_data_dir}, creating sample file")
+        if create_sample_csv():
+            logger.info("Sample CSV file created successfully")
+        else:
+            logger.warning("Failed to create sample CSV, using default keywords")
     
     # Check if the original large CSV file exists and use it for training
     full_csv_path = os.path.join(os.path.dirname(__file__), 'Suicide_Detection.csv')
+    # Also check in data directory
+    if not os.path.exists(full_csv_path):
+        alt_path = os.path.join(DATA_DIR, 'Suicide_Detection.csv')
+        if os.path.exists(alt_path):
+            full_csv_path = alt_path
+    
     if os.path.exists(full_csv_path):
-        logger.info("Found original large CSV file, using it for training with chunked processing")
-        success = suicide_predictor.train_from_large_csv(full_csv_path, chunk_size=10000)
+        logger.info(f"Found original large CSV file at {full_csv_path}")
+        
+        # Get chunk parameters from environment variables
+        chunk_size = int(os.getenv("CHUNK_SIZE", "5000"))
+        max_chunks = int(os.getenv("MAX_CHUNKS", "20"))
+        # Set max_chunks to None if 0
+        if max_chunks <= 0:
+            max_chunks = None
+            
+        logger.info(f"Training with chunk_size={chunk_size}, max_chunks={max_chunks}")
+        success = suicide_predictor.train_from_large_csv(
+            csv_filepath=full_csv_path, 
+            chunk_size=chunk_size,
+            max_chunks=max_chunks
+        )
+        
         if not success:
             logger.warning("Failed to train from large CSV file, falling back to sample CSV")
             # If large CSV processing failed, try the sample CSV
             if os.path.exists(extract_data_dir):
-                logger.info("Using sample CSV for keyword extraction")
+                logger.info(f"Using sample CSV for keyword extraction: {extract_data_dir}")
                 suicide_predictor.extract_keywords_from_csv(extract_data_dir)
     else:
+        logger.info(f"Large CSV file not found at {full_csv_path}, using sample CSV")
         # If large CSV doesn't exist, use sample CSV
         if os.path.exists(extract_data_dir):
-            logger.info("Using sample CSV for keyword extraction")
+            logger.info(f"Using sample CSV for keyword extraction: {extract_data_dir}")
             success = suicide_predictor.extract_keywords_from_csv(extract_data_dir)
             
             # If extraction failed, recreate the CSV file and try again
             if not success:
                 logger.warning("CSV extraction failed, creating new sample CSV file")
-                os.remove(extract_data_dir)
+                try:
+                    os.remove(extract_data_dir)
+                    logger.info(f"Removed problematic CSV file: {extract_data_dir}")
+                except Exception as e:
+                    logger.warning(f"Failed to remove CSV file: {e}")
+                    
                 create_sample_csv()
                 if os.path.exists(extract_data_dir):
                     logger.info("Trying extraction again with new CSV file")
                     suicide_predictor.extract_keywords_from_csv(extract_data_dir)
         else:
             logger.warning("No CSV file available, using default keywords")
+            suicide_predictor._set_default_keywords()
     
     # Set startup flag
     models_loaded = True
@@ -381,14 +418,26 @@ def train_model(csv_path: str = Body(..., embed=True)):
 
 # Server run function modified to directly pass app
 def start_server():
-    """API server run"""
-    # Important: Run before logging output
+    """
+    API server run function.
+    Makes sure to use PORT environment variable as required by Render.
+    """
+    # Get port from environment variable (critical for Render deployment)
     port = int(os.getenv("PORT", 8000))
+    
+    # Log deployment information
     logger.info("Starting server...")
+    logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
     logger.info(f"Port: {port}")
     logger.info(f"Current directory: {os.getcwd()}")
+    logger.info(f"Files in current directory: {', '.join(os.listdir('.'))}")
     
-    # Directly pass FastAPI app to Uvicorn execution
+    # Log model and data status
+    logger.info(f"Models directory exists: {os.path.exists(MODELS_DIR)}")
+    logger.info(f"Data directory exists: {os.path.exists(DATA_DIR)}")
+    
+    # Directly pass FastAPI app to Uvicorn
+    # Using host 0.0.0.0 to listen on all available network interfaces (required for Render)
     uvicorn.run(
         app,
         host="0.0.0.0",
