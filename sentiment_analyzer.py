@@ -4,23 +4,23 @@ import torch
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 import numpy as np
 
-# 환경 설정
+# Environment setup
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class SentimentAnalyzer:
     def __init__(self):
-        """감정 분석을 위한 클래스 초기화"""
+        """Initialize class for sentiment analysis"""
         try:
-            # 기본 감정 분석 모델 로드 (Hugging Face transformers)
-            model_name = "distilbert-base-uncased-finetuned-sst-2-english"  # 기본 감정 분석 모델
+            # Load default sentiment analysis model (Hugging Face transformers)
+            model_name = "distilbert-base-uncased-finetuned-sst-2-english"  # Default sentiment analysis model
             
             logger.info(f"Loading sentiment analysis model: {model_name}")
             self.tokenizer = AutoTokenizer.from_pretrained(model_name)
             self.model = AutoModelForSequenceClassification.from_pretrained(model_name)
             
-            # 추가 부정적 감정 키워드 - 자살 생각과 관련된 단어들
+            # Additional negative emotion keywords - words related to suicidal thoughts
             self.negative_keywords = [
                 'suicide', 'kill myself', 'end my life', 'want to die', 'better off dead',
                 'no reason to live', 'can\'t go on', 'hopeless', 'worthless', 'burden',
@@ -36,19 +36,19 @@ class SentimentAnalyzer:
             raise
     
     def predict_sentiment(self, text):
-        """텍스트 감정 분석 예측 (positive/negative)"""
+        """Predict text sentiment (positive/negative)"""
         try:
-            # 모델 입력 준비
+            # Prepare model input
             inputs = self.tokenizer(text, return_tensors="pt", truncation=True, padding=True)
             
-            # 예측
+            # Prediction
             with torch.no_grad():
                 outputs = self.model(**inputs)
                 
-            # 결과 처리
+            # Process results
             scores = outputs.logits.softmax(dim=1).numpy()[0]
             
-            # 모델 결과는 [negative, positive] 형태
+            # Model results are in [negative, positive] format
             negative_score = float(scores[0])
             positive_score = float(scores[1])
             
@@ -65,13 +65,13 @@ class SentimentAnalyzer:
             }
     
     def analyze_suicide_sentiment(self, text):
-        """텍스트에서 자살 경향 관련 감정 분석"""
+        """Analyze suicide tendency related emotions in text"""
         try:
-            # 기본 감정 분석
+            # Basic sentiment analysis
             sentiment = self.predict_sentiment(text)
             negative_score = sentiment['negative_score']
             
-            # 자살 관련 키워드 검출
+            # Detect suicide-related keywords
             keyword_count = 0
             keyword_matches = []
             
@@ -80,17 +80,17 @@ class SentimentAnalyzer:
                     keyword_count += 1
                     keyword_matches.append(keyword)
             
-            # 자살 관련 키워드 가중치 (최대 0.3)
+            # Suicide-related keyword weight (max 0.3)
             keyword_weight = min(0.3, keyword_count * 0.02)
             
-            # 최종 위험도 점수 계산
-            # 기본 감정 분석 결과(negative_score)에 키워드 가중치 추가
+            # Calculate final risk score
+            # Add keyword weight to basic sentiment analysis result (negative_score)
             risk_score_raw = negative_score + keyword_weight
             
-            # 점수를 1-100 범위로 조정
+            # Adjust score to 1-100 range
             risk_score = min(100, int(risk_score_raw * 100))
             
-            # 위험 단계 분류
+            # Classify risk level
             risk_level = "Low Risk"
             if risk_score >= 75:
                 risk_level = "Very High Risk"
@@ -110,18 +110,18 @@ class SentimentAnalyzer:
         except Exception as e:
             logger.error(f"Error in suicide sentiment analysis: {e}")
             return {
-                'risk_score': 50,  # 기본값
+                'risk_score': 50,  # Default value
                 'risk_level': "Medium Risk",
                 'negative_sentiment': 0.5,
                 'keyword_matches': [],
                 'keyword_count': 0
             }
 
-# 테스트 코드
+# Test code
 if __name__ == "__main__":
     analyzer = SentimentAnalyzer()
     
-    # 테스트 샘플
+    # Test samples
     test_samples = [
         "I'm feeling good today, everything is working out well.",
         "I don't know if I can continue living like this anymore. I feel hopeless.",

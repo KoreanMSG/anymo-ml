@@ -17,21 +17,21 @@ import re
 from enum import Enum
 from typing import Optional, List, Dict, Any
 
-# 환경 설정
+# Environment settings
 logging.basicConfig(level=logging.INFO, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# NLTK 리소스 다운로드
+# NLTK resource download
 try:
-    # NLTK 데이터 디렉토리 설정 (Render 환경에서 쓰기 가능한 경로로)
+    # NLTK data directory setup (writable path for Render environment)
     nltk_data_dir = os.path.join(os.path.dirname(__file__), 'nltk_data')
     os.makedirs(nltk_data_dir, exist_ok=True)
     
-    # NLTK 데이터 경로 설정
+    # Set NLTK data path
     nltk.data.path.append(nltk_data_dir)
     
-    # 필요한 데이터 다운로드
+    # Download required data
     nltk.download('punkt', download_dir=nltk_data_dir, quiet=True)
     nltk.download('stopwords', download_dir=nltk_data_dir, quiet=True)
     nltk.download('wordnet', download_dir=nltk_data_dir, quiet=True)
@@ -39,7 +39,7 @@ try:
     logger.info(f"NLTK resources downloaded to {nltk_data_dir}")
 except Exception as e:
     logger.warning(f"NLTK download warning: {e}")
-    # 에러가 있더라도 기본적인 처리 가능하도록 준비
+    # Prepare for basic processing even if there are errors
     try:
         from nltk.tokenize import word_tokenize as _word_tokenize
         def word_tokenize(text):
@@ -128,114 +128,117 @@ class SuicidePredictor:
         
         return text
     
-    def extract_keywords_from_csv(self, csv_path):
-        """
-        CSV 파일에서 자살 관련 키워드를 추출합니다.
-        
-        Args:
-            csv_path (str): CSV 파일 경로
-        
-        Returns:
-            bool: 추출 성공 여부
-        """
+    def extract_keywords_from_csv(self, csv_filepath):
+        """Extract suicide-related keywords from CSV file."""
         try:
-            # CSV 파일 로드 (on_bad_lines='skip' to handle parsing errors)
+            logger.info(f"Loading CSV file for keyword extraction: {csv_filepath}")
+            
+            # First try with default settings and skipping bad lines
             try:
-                # First try with more lenient parsing
-                df = pd.read_csv(csv_path, on_bad_lines='skip', quoting=pd.io.common.csv.QUOTE_MINIMAL, 
-                                engine='python', encoding='utf-8', error_bad_lines=False)
-                logger.info(f"Successfully loaded CSV file with {len(df)} rows after skipping bad lines")
-            except Exception as inner_e:
-                logger.warning(f"First CSV parsing attempt failed: {inner_e}, trying alternative method")
+                df = pd.read_csv(csv_filepath, encoding='utf-8', on_bad_lines='skip')
+                logger.info(f"CSV file loaded successfully: {len(df)} rows")
+            except Exception as e:
+                logger.warning(f"First CSV parsing attempt failed: {str(e)}, trying alternative method")
                 try:
-                    # Try with C engine but with minimal quoting
-                    df = pd.read_csv(csv_path, quoting=pd.io.common.csv.QUOTE_MINIMAL, encoding='utf-8')
-                except Exception as inner_e2:
-                    logger.warning(f"Second CSV parsing attempt failed: {inner_e2}, trying final method")
-                    # Last resort - try to read with Python engine and no quoting
-                    df = pd.read_csv(csv_path, quoting=pd.io.common.csv.QUOTE_NONE, encoding='utf-8', engine='python')
+                    # Try with Python engine and minimal quoting
+                    import csv
+                    df = pd.read_csv(csv_filepath, encoding='utf-8', engine='python', quoting=csv.QUOTE_MINIMAL)
+                    logger.info(f"CSV file loaded successfully (alternative method): {len(df)} rows")
+                except Exception as e:
+                    logger.warning(f"Second CSV parsing attempt failed: {str(e)}, trying final method")
+                    try:
+                        # Final attempt with no quoting
+                        df = pd.read_csv(csv_filepath, encoding='utf-8', engine='python', quoting=csv.QUOTE_NONE, escapechar='\\')
+                        logger.info(f"CSV file loaded successfully (final method): {len(df)} rows")
+                    except Exception as e:
+                        raise Exception(f"All CSV parsing methods failed: {str(e)}")
             
-            logger.info(f"Loaded CSV with {len(df)} rows and {len(df.columns)} columns")
-            
-            # 최소 2개 이상의 열이 있는지 확인 (텍스트, 라벨)
+            # Check if the dataframe has at least 2 columns (text and label)
             if len(df.columns) < 2:
-                logger.warning("CSV 파일의 열이 부족합니다. 기본 키워드를 사용합니다.")
-                self._set_default_keywords()
+                logger.warning(f"CSV file needs at least 2 columns (current: {len(df.columns)})")
                 return False
             
-            # 텍스트 열과 라벨 열 추출 (첫 번째와 두 번째 열 가정)
-            text_col = df.columns[0]
-            label_col = df.columns[1]
+            logger.info(f"CSV columns: {', '.join(df.columns)}")
             
-            # 라벨이 1인 텍스트만 선택 (자살 관련 텍스트)
-            # Handle different label formats (1, '1', 'yes', etc.)
+            # Get the column names (typically 'text' and 'class' or 'label')
+            text_col = df.columns[0]  # First column is typically text
+            label_col = df.columns[1]  # Second column is typically label
+            
+            logger.info(f"Text column: {text_col}, Label column: {label_col}")
+            
+            # Extract suicide-related texts (where label is 1 or 'suicide')
             suicide_texts = []
-            non_suicide_texts = []
             
-            # Check if label is numeric
+            # Check if label is numeric or string
             if pd.api.types.is_numeric_dtype(df[label_col]):
-                suicide_texts = df[df[label_col] == 1][text_col].astype(str).tolist()
-                non_suicide_texts = df[df[label_col] == 0][text_col].astype(str).tolist()
+                suicide_mask = df[label_col] == 1
             else:
-                # For string labels
-                suicide_keywords = ['suicide', 'suicidal', 'yes', 'positive', '1', 'true']
-                suicide_mask = df[label_col].astype(str).apply(lambda x: x.lower() in suicide_keywords)
-                suicide_texts = df[suicide_mask][text_col].astype(str).tolist()
-                non_suicide_texts = df[~suicide_mask][text_col].astype(str).tolist()
+                # If label is string, check for 'suicide', '1', etc.
+                suicide_mask = df[label_col].str.lower().isin(['suicide', '1', 'yes', 'true'])
+            
+            suicide_texts = df.loc[suicide_mask, text_col].tolist()
+            
+            logger.info(f"Extracted suicide-related texts: {len(suicide_texts)}")
             
             if len(suicide_texts) == 0:
-                logger.warning("자살 관련 텍스트가 없습니다. 기본 키워드를 사용합니다.")
-                self._set_default_keywords()
+                logger.warning("No suicide-related texts found. Using default keywords.")
                 return False
             
-            logger.info(f"Found {len(suicide_texts)} suicide-related texts and {len(non_suicide_texts)} non-suicide texts")
+            # Use TF-IDF to extract keywords
+            vectorizer = TfidfVectorizer(max_features=50, stop_words='english')
+            tfidf_matrix = vectorizer.fit_transform(suicide_texts)
+            feature_names = vectorizer.get_feature_names_out()
             
-            # TF-IDF 벡터라이저 적용
-            tfidf = TfidfVectorizer(max_features=200, stop_words='english', ngram_range=(1, 2))
-            tfidf_matrix = tfidf.fit_transform(suicide_texts)
-            feature_names = tfidf.get_feature_names_out()
+            # Calculate average TF-IDF score for each keyword
+            avg_scores = tfidf_matrix.mean(axis=0).A1
             
-            # 각 단어의 TF-IDF 점수 평균 계산
-            tfidf_means = tfidf_matrix.mean(axis=0).A1
+            # Sort keywords by score
+            keywords_with_scores = list(zip(feature_names, avg_scores))
+            keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
             
-            # 단어와 점수를 튜플 리스트로 변환
-            word_scores = [(word, score) for word, score in zip(feature_names, tfidf_means)]
+            # Categorize keywords into high, medium, low based on scores
+            total_keywords = len(keywords_with_scores)
+            high_count = max(5, total_keywords // 3)
+            medium_count = max(10, total_keywords // 3)
             
-            # 점수 기준으로 정렬
-            word_scores.sort(key=lambda x: x[1], reverse=True)
-            
-            # 위험도별 키워드 수 계산
-            total_keywords = len(word_scores)
-            high_risk_count = min(int(total_keywords * 0.2), 50)  # 상위 20%, 최대 50개
-            medium_risk_count = min(int(total_keywords * 0.3), 100)  # 상위 30%, 최대 100개
-            low_risk_count = min(total_keywords - high_risk_count - medium_risk_count, 150)  # 나머지, 최대 150개
-            
-            # 키워드 분류
             self.keywords = {
-                "high": [word for word, _ in word_scores[:high_risk_count]],
-                "medium": [word for word, _ in word_scores[high_risk_count:high_risk_count + medium_risk_count]],
-                "low": [word for word, _ in word_scores[high_risk_count + medium_risk_count:high_risk_count + medium_risk_count + low_risk_count]]
+                "high": [kw for kw, _ in keywords_with_scores[:high_count]],
+                "medium": [kw for kw, _ in keywords_with_scores[high_count:high_count+medium_count]],
+                "low": [kw for kw, _ in keywords_with_scores[high_count+medium_count:]]
             }
             
-            # 추출된 키워드 검증
-            if not all(len(self.keywords[level]) > 0 for level in ["high", "medium", "low"]):
-                logger.warning("일부 위험도 레벨에 키워드가 없습니다. 기본 키워드를 추가합니다.")
-                self._add_default_keywords()
+            # Log some examples from each category
+            logger.info(f"High risk keywords ({len(self.keywords['high'])}): " + 
+                      ', '.join(self.keywords['high'][:5]))
+            logger.info(f"Medium risk keywords ({len(self.keywords['medium'])}): " + 
+                      ', '.join(self.keywords['medium'][:5]))
+            logger.info(f"Low risk keywords ({len(self.keywords['low'])}): " + 
+                      ', '.join(self.keywords['low'][:5]))
             
-            logger.info(f"키워드 추출 완료: 고위험 {len(self.keywords['high'])}개, 중위험 {len(self.keywords['medium'])}개, 저위험 {len(self.keywords['low'])}개")
-            logger.info(f"고위험 키워드 예시: {self.keywords['high'][:5]}")
-            logger.info(f"중위험 키워드 예시: {self.keywords['medium'][:5]}")
-            logger.info(f"저위험 키워드 예시: {self.keywords['low'][:5]}")
+            # Ensure we have at least some keywords in each category
+            if not self.keywords["high"]:
+                self.keywords["high"] = ["kill myself", "want to die", "end my life", "suicide"]
+            if not self.keywords["medium"]:
+                self.keywords["medium"] = ["hopeless", "worthless", "dead", "can't go on"]
+            if not self.keywords["low"]:
+                self.keywords["low"] = ["depressed", "sad", "pain", "hurt"]
             
             return True
-            
+        
         except Exception as e:
-            logger.error(f"키워드 추출 중 오류 발생: {e}")
-            self._set_default_keywords()
+            logger.error(f"Error during keyword extraction: {str(e)}")
+            
+            # Set default keywords
+            self.keywords = {
+                "high": ["kill myself", "want to die", "end my life", "suicide", "end it all"],
+                "medium": ["hopeless", "worthless", "dead", "can't go on", "no point"],
+                "low": ["depressed", "sad", "pain", "hurt", "tired of"]
+            }
+            logger.info("Using default keywords.")
             return False
     
     def _set_default_keywords(self):
-        """기본 키워드 설정"""
+        """Set default keywords"""
         self.keywords = {
             "high": [
                 "suicide", "kill myself", "end my life", "want to die", "rather be dead",
@@ -250,10 +253,10 @@ class SuicidePredictor:
                 "hurt", "failure", "miserable", "lost", "empty"
             ]
         }
-        logger.info("기본 키워드를 사용합니다.")
+        logger.info("Using default keywords.")
 
     def _add_default_keywords(self):
-        """기존 키워드에 기본 키워드 추가"""
+        """Add default keywords to existing keywords"""
         default_keywords = {
             "high": [
                 "suicide", "kill myself", "end my life", "want to die", "rather be dead",
@@ -269,67 +272,74 @@ class SuicidePredictor:
             ]
         }
         
-        # 각 위험도 레벨에 기본 키워드 추가 (중복 제거)
+        # Add default keywords to each risk level (removing duplicates)
         for level in ["high", "medium", "low"]:
             existing_keywords_set = set(self.keywords[level])
             for keyword in default_keywords[level]:
                 if keyword not in existing_keywords_set:
                     self.keywords[level].append(keyword)
 
-    def train_from_csv(self, csv_path):
-        """CSV 데이터로부터 모델 학습"""
+    def train_from_csv(self, csv_filepath):
+        """Train suicide prediction model from CSV file."""
         try:
-            # 키워드 먼저 추출
-            self.extract_keywords_from_csv(csv_path)
+            logger.info(f"Training model from CSV file: {csv_filepath}")
             
-            # 데이터 로드 (with error handling)
+            # First try with default settings and skipping bad lines
             try:
-                # First try with more lenient parsing
-                df = pd.read_csv(csv_path, on_bad_lines='skip', quoting=pd.io.common.csv.QUOTE_MINIMAL, 
-                                engine='python', encoding='utf-8', error_bad_lines=False)
-                logger.info(f"For training, loaded CSV with {len(df)} rows after skipping bad lines")
-            except Exception as inner_e:
-                logger.warning(f"First CSV parsing attempt failed: {inner_e}, trying alternative method")
+                import csv
+                df = pd.read_csv(csv_filepath, encoding='utf-8', on_bad_lines='skip')
+                logger.info(f"CSV file loaded successfully: {len(df)} rows")
+            except Exception as e:
+                logger.warning(f"First CSV parsing attempt failed: {str(e)}, trying alternative method")
                 try:
-                    # Try with C engine but with minimal quoting
-                    df = pd.read_csv(csv_path, quoting=pd.io.common.csv.QUOTE_MINIMAL, encoding='utf-8')
-                except Exception as inner_e2:
-                    logger.warning(f"Second CSV parsing attempt failed: {inner_e2}, trying final method")
-                    # Last resort - try to read with Python engine and no quoting
-                    df = pd.read_csv(csv_path, quoting=pd.io.common.csv.QUOTE_NONE, encoding='utf-8', engine='python')
+                    # Try with Python engine and minimal quoting
+                    df = pd.read_csv(csv_filepath, encoding='utf-8', engine='python', quoting=csv.QUOTE_MINIMAL)
+                    logger.info(f"CSV file loaded successfully (alternative method): {len(df)} rows")
+                except Exception as e:
+                    logger.warning(f"Second CSV parsing attempt failed: {str(e)}, trying final method")
+                    try:
+                        # Final attempt with no quoting
+                        df = pd.read_csv(csv_filepath, encoding='utf-8', engine='python', quoting=csv.QUOTE_NONE, escapechar='\\')
+                        logger.info(f"CSV file loaded successfully (final method): {len(df)} rows")
+                    except Exception as e:
+                        raise Exception(f"All CSV parsing methods failed: {str(e)}")
             
-            # 데이터 구조 확인
-            if len(df.columns) >= 2:
-                text_column = df.columns[0] if df.columns[0] != '' else df.columns[1]
-                label_column = df.columns[1]
-                
-                # 데이터 준비
-                X = df[text_column].fillna('')
-                
-                # 라벨 변환 (필요한 경우)
-                if not pd.api.types.is_numeric_dtype(df[label_column]):
-                    suicide_keywords = ['suicide', 'suicidal', 'yes', 'positive', '1', 'true']
-                    y = df[label_column].apply(
-                        lambda x: 1 if str(x).lower() in suicide_keywords else 0
-                    )
-                else:
-                    y = df[label_column]
-                
-                # 데이터 전처리 및 학습
-                self.vectorizer = TfidfVectorizer(max_features=5000)
-                X_transformed = self.vectorizer.fit_transform(X)
-                
-                # 모델 학습
-                self.model = LogisticRegression(C=1.0, max_iter=200)
-                self.model.fit(X_transformed, y)
-                
-                logger.info(f"모델 학습 완료: {len(X)} 샘플, 양성 샘플 {sum(y)} 개")
-                return True
-            else:
-                logger.error(f"CSV 파일 형식이 올바르지 않음: {csv_path}")
+            # Check if the dataframe has at least 2 columns (text and label)
+            if len(df.columns) < 2:
+                logger.warning(f"CSV file needs at least 2 columns (current: {len(df.columns)})")
                 return False
+            
+            logger.info(f"CSV columns: {', '.join(df.columns)}")
+            
+            # Prepare data for model training
+            X = df.iloc[:, 0].values  # First column is typically text
+            y = df.iloc[:, 1].values  # Second column is typically label
+            
+            # Convert labels to binary if they're not already
+            if not np.issubdtype(y.dtype, np.number):
+                # If y is not numeric, convert values like 'suicide', 'yes', 'true' to 1, others to 0
+                y = np.array([1 if str(label).lower() in ['suicide', '1', 'yes', 'true'] else 0 for label in y])
+            
+            # Extract keywords before training
+            self.extract_keywords_from_csv(csv_filepath)
+            
+            # Transform the text data
+            vectorizer = TfidfVectorizer(max_features=5000)
+            X_transformed = vectorizer.fit_transform(X)
+            
+            # Train the model
+            model = LogisticRegression(max_iter=1000)
+            model.fit(X_transformed, y)
+            
+            # Save the model components
+            self.vectorizer = vectorizer
+            self.model = model
+            
+            logger.info("Model training completed")
+            return True
+        
         except Exception as e:
-            logger.error(f"학습 실패: {e}")
+            logger.error(f"Error during model training: {str(e)}")
             return False
     
     def train(self, csv_path, test_size=0.2, random_state=42):
@@ -435,22 +445,22 @@ class SuicidePredictor:
     
     def predict(self, text, use_model=True):
         """
-        텍스트의 자살 위험도 예측
+        Predict suicide risk level for text
         
         Parameters:
         -----------
         text : str
-            분석할 텍스트
+            Text to analyze
         use_model : bool, default=True
-            학습된 모델을 사용할지 여부. False인 경우 키워드 기반으로만 예측
+            Whether to use trained model. If False, only keyword-based prediction is used
             
         Returns:
         --------
         dict
-            - risk_level: 위험도 수준 ('none', 'low', 'medium', 'high')
-            - risk_score: 위험도 점수 (0-100)
-            - keywords_found: 텍스트에서 발견된 키워드 목록
-            - model_used: 모델 사용 여부
+            - risk_level: Risk level ('none', 'low', 'medium', 'high')
+            - risk_score: Risk score (0-100)
+            - keywords_found: List of keywords found in text
+            - model_used: Whether model was used
         """
         if not text or len(text.strip()) == 0:
             return {
@@ -460,33 +470,33 @@ class SuicidePredictor:
                 "model_used": False
             }
         
-        # 키워드 기반 위험도 계산
+        # Calculate risk based on keywords
         risk_score = self._calculate_keyword_risk(text)
         keywords_found = self._find_keywords_in_text(text)
         
-        # 학습된 모델이 있고 모델 사용이 지정된 경우
+        # Use trained model if available and specified
         model_used = False
         if use_model and self.model is not None:
             try:
-                # 모델 예측
+                # Model prediction
                 prediction = self.model.predict_proba([text])[0]
-                # 모델 예측 확률 (0: 비자살, 1: 자살)
+                # Model prediction probability (0: non-suicide, 1: suicide)
                 suicide_prob = prediction[1]
                 
-                # 모델 점수를 100점 만점으로 변환 (키워드와 결합)
+                # Convert model score to 100-point scale (to combine with keywords)
                 model_score = suicide_prob * 100
                 logger.debug(f"Model prediction: {suicide_prob:.4f}, Model score: {model_score:.2f}")
                 
-                # 키워드 점수와 모델 점수 가중 결합 (모델 70%, 키워드 30%)
+                # Weighted combination of keyword score and model score (model 70%, keywords 30%)
                 risk_score = model_score * 0.7 + risk_score * 0.3
                 model_used = True
                 
                 logger.debug(f"Combined risk score: {risk_score:.2f}")
             except Exception as e:
                 logger.error(f"Model prediction failed: {e}")
-                # 모델 예측 실패 시 키워드 점수만 사용
+                # Use only keyword score if model prediction fails
         
-        # 최종 위험도 레벨 결정
+        # Determine final risk level
         risk_level = self._interpret_risk_score(risk_score)
         
         return {
