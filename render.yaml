@@ -4,7 +4,7 @@ services:
     env: python
     region: singapore
     plan: free
-    buildCommand: pip install -r requirements.txt && python download_nltk.py && mkdir -p data models
+    buildCommand: pip install -r requirements.txt && python download_nltk.py && python deploy_check.py && mkdir -p data models
     startCommand: gunicorn -w 4 -k uvicorn.workers.UvicornWorker api:app --bind 0.0.0.0:$PORT
     envVars:
       - key: PORT
