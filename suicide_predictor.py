@@ -72,31 +72,83 @@ class SuicidePredictor:
             "low": []
         }
         
+        # Setup fallback NLTK functionality
         try:
-            self.lemmatizer = WordNetLemmatizer()
-            try:
-                self.stop_words = set(stopwords.words('english'))
-            except Exception as e:
-                logger.warning(f"Could not load stopwords: {e}")
-                self.stop_words = set()
+            self._setup_nltk_resources()
         except Exception as e:
-            logger.warning(f"Could not initialize lemmatizer: {e}")
-            # Fallback handling
-            class DummyLemmatizer:
-                def lemmatize(self, word):
-                    return word
-            self.lemmatizer = DummyLemmatizer()
-            self.stop_words = set()
+            logger.warning(f"Could not initialize NLTK resources properly: {e}")
+            self._setup_nltk_fallbacks()
         
-        # 모델 로드 또는 생성
+        # Load model if it exists
         if os.path.exists(model_path):
             try:
-                self.model = joblib.load(model_path)
-                logger.info(f"Model loaded from {model_path}")
+                loaded_model = joblib.load(model_path)
+                
+                # Check model format
+                if isinstance(loaded_model, dict) and 'vectorizer' in loaded_model and 'classifier' in loaded_model:
+                    # Model created via chunked training
+                    logger.info(f"Loaded chunked training model from {model_path}")
+                    self.model = loaded_model
+                    self.vectorizer = loaded_model['vectorizer']
+                elif hasattr(loaded_model, 'predict_proba'):
+                    # Standard sklearn model/pipeline
+                    logger.info(f"Loaded standard model from {model_path}")
+                    self.model = loaded_model
+                    
+                    # Try to get vectorizer from pipeline if available
+                    if hasattr(loaded_model, 'named_steps') and 'tfidf' in loaded_model.named_steps:
+                        self.vectorizer = loaded_model.named_steps['tfidf']
+                else:
+                    logger.warning(f"Unknown model format in {model_path}, may cause issues")
+                    self.model = loaded_model
+                
+                logger.info(f"Model loaded successfully from {model_path}")
             except Exception as e:
                 logger.error(f"Failed to load model: {e}")
                 self.model = None
+                import traceback
+                logger.error(traceback.format_exc())
     
+    def _setup_nltk_resources(self):
+        """Set up NLTK resources with proper error handling"""
+        try:
+            self.lemmatizer = WordNetLemmatizer()
+            self.stop_words = set(stopwords.words('english'))
+            logger.info("NLTK resources initialized successfully")
+        except Exception as e:
+            logger.warning(f"NLTK resource initialization warning: {e}")
+            raise
+
+    def _setup_nltk_fallbacks(self):
+        """Set up fallback functionality when NLTK resources aren't available"""
+        logger.info("Setting up NLTK fallbacks")
+        
+        # Create dummy lemmatizer
+        class DummyLemmatizer:
+            def lemmatize(self, word):
+                return word
+        self.lemmatizer = DummyLemmatizer()
+        
+        # Create basic English stopwords
+        self.stop_words = set([
+            'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', 
+            'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 
+            'she', 'her', 'hers', 'herself', 'it', 'its', 'itself', 'they', 'them', 
+            'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this', 
+            'that', 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been', 
+            'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 
+            'a', 'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until', 
+            'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 
+            'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to', 
+            'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 
+            'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 
+            'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 
+            'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 
+            's', 't', 'can', 'will', 'just', 'don', 'should', 'now'
+        ])
+        
+        logger.info("NLTK fallbacks initialized")
+
     def preprocess_text(self, text):
         """
         텍스트 전처리 함수
@@ -242,15 +294,30 @@ class SuicidePredictor:
         self.keywords = {
             "high": [
                 "suicide", "kill myself", "end my life", "want to die", "rather be dead",
-                "take my own life", "ending it all", "ending my life", "killing myself", "commit suicide"
+                "take my own life", "ending it all", "ending my life", "killing myself", "commit suicide",
+                "overdose", "jump", "hang myself", "shoot myself", "self-harm", "slit wrists", "noose", 
+                "suicidal thoughts", "better off dead", "not worth living", "die soon", "suicidal ideation",
+                "lethal", "razor", "gun", "pills", "fatal", "suicide note", "final goodbye",
+                "want to end it all", "take my own life", "end it all", "last day",
+                "life insurance", "will and testament", "sleeping pills", "painless death"
             ],
             "medium": [
                 "hopeless", "worthless", "no reason to live", "can't go on", "tired of living",
-                "what's the point", "better off dead", "no future", "no hope", "give up"
+                "what's the point", "better off dead", "no future", "no hope", "give up",
+                "helpless", "depressed", "miserable", "suffering", "burden to others", 
+                "no purpose", "no meaning", "darkness", "unbearable pain", "emptiness", 
+                "nothingness", "despair", "trapped", "agony", "anguish", "torment", 
+                "exhausted", "meaningless", "pointless", "alone", "lonely", "isolated", 
+                "abandoned", "rejected", "giving up", "can't cope", "too much pain", "endless suffering"
             ],
             "low": [
                 "depressed", "depression", "sad", "lonely", "alone", "pain", "suffering",
-                "hurt", "failure", "miserable", "lost", "empty"
+                "hurt", "failure", "miserable", "lost", "empty", "upset", "unhappy", 
+                "frustrated", "disappointed", "tired", "exhausted", "dissatisfied", 
+                "unfulfilled", "discouraged", "disheartened", "dejected", "heartbroken", 
+                "defeated", "fatigued", "weary", "drained", "spent", "troubled", "distressed", 
+                "blue", "down", "gloomy", "sorrowful", "tearful", "confused", "struggling",
+                "numb", "anxiety", "worry", "stressed"
             ]
         }
         logger.info("Using default keywords.")
@@ -260,15 +327,30 @@ class SuicidePredictor:
         default_keywords = {
             "high": [
                 "suicide", "kill myself", "end my life", "want to die", "rather be dead",
-                "take my own life", "ending it all", "ending my life", "killing myself", "commit suicide"
+                "take my own life", "ending it all", "ending my life", "killing myself", "commit suicide",
+                "overdose", "jump", "hang myself", "shoot myself", "self-harm", "slit wrists", "noose", 
+                "suicidal thoughts", "better off dead", "not worth living", "die soon", "suicidal ideation",
+                "lethal", "razor", "gun", "pills", "fatal", "suicide note", "final goodbye",
+                "want to end it all", "take my own life", "end it all", "last day",
+                "life insurance", "will and testament", "sleeping pills", "painless death"
             ],
             "medium": [
                 "hopeless", "worthless", "no reason to live", "can't go on", "tired of living",
-                "what's the point", "better off dead", "no future", "no hope", "give up"
+                "what's the point", "better off dead", "no future", "no hope", "give up",
+                "helpless", "depressed", "miserable", "suffering", "burden to others", 
+                "no purpose", "no meaning", "darkness", "unbearable pain", "emptiness", 
+                "nothingness", "despair", "trapped", "agony", "anguish", "torment", 
+                "exhausted", "meaningless", "pointless", "alone", "lonely", "isolated", 
+                "abandoned", "rejected", "giving up", "can't cope", "too much pain", "endless suffering"
             ],
             "low": [
                 "depressed", "depression", "sad", "lonely", "alone", "pain", "suffering",
-                "hurt", "failure", "miserable", "lost", "empty"
+                "hurt", "failure", "miserable", "lost", "empty", "upset", "unhappy", 
+                "frustrated", "disappointed", "tired", "exhausted", "dissatisfied", 
+                "unfulfilled", "discouraged", "disheartened", "dejected", "heartbroken", 
+                "defeated", "fatigued", "weary", "drained", "spent", "troubled", "distressed", 
+                "blue", "down", "gloomy", "sorrowful", "tearful", "confused", "struggling",
+                "numb", "anxiety", "worry", "stressed"
             ]
         }
         
@@ -478,10 +560,44 @@ class SuicidePredictor:
         model_used = False
         if use_model and self.model is not None:
             try:
-                # Model prediction
-                prediction = self.model.predict_proba([text])[0]
-                # Model prediction probability (0: non-suicide, 1: suicide)
-                suicide_prob = prediction[1]
+                # Check model format
+                if isinstance(self.model, dict) and 'classifier' in self.model and 'vectorizer' in self.model:
+                    # Using the chunked training model format
+                    vectorizer = self.model['vectorizer']
+                    classifier = self.model['classifier']
+                    
+                    # Transform the text using the vectorizer
+                    X_transformed = vectorizer.transform([text])
+                    
+                    # Predict using the classifier
+                    prediction = classifier.predict_proba(X_transformed)[0]
+                    suicide_prob = prediction[1]  # Probability of suicide class (index 1)
+                    logger.debug(f"Chunked model prediction: {suicide_prob:.4f}")
+                elif hasattr(self.model, 'predict_proba') and hasattr(self.model, 'named_steps'):
+                    # Using the pipeline format (standard scikit-learn pipeline)
+                    prediction = self.model.predict_proba([text])[0]
+                    suicide_prob = prediction[1]
+                    logger.debug(f"Pipeline model prediction: {suicide_prob:.4f}")
+                elif hasattr(self.model, 'predict_proba'):
+                    # Direct classifier (no pipeline)
+                    # We need to transform the text ourselves if we have a vectorizer
+                    if self.vectorizer is not None:
+                        X_transformed = self.vectorizer.transform([text])
+                        prediction = self.model.predict_proba(X_transformed)[0]
+                    else:
+                        # Try direct prediction (might fail if text format is wrong)
+                        prediction = self.model.predict_proba([text])[0]
+                    suicide_prob = prediction[1]
+                    logger.debug(f"Direct model prediction: {suicide_prob:.4f}")
+                else:
+                    # Unknown model format
+                    logger.warning(f"Unknown model format: {type(self.model)}. Using keyword-based prediction only.")
+                    return {
+                        "risk_level": self._interpret_risk_score(risk_score),
+                        "risk_score": round(risk_score, 2),
+                        "keywords_found": keywords_found,
+                        "model_used": False
+                    }
                 
                 # Convert model score to 100-point scale (to combine with keywords)
                 model_score = suicide_prob * 100
@@ -495,6 +611,8 @@ class SuicidePredictor:
             except Exception as e:
                 logger.error(f"Model prediction failed: {e}")
                 # Use only keyword score if model prediction fails
+                import traceback
+                logger.error(traceback.format_exc())
         
         # Determine final risk level
         risk_level = self._interpret_risk_score(risk_score)
@@ -536,10 +654,17 @@ class SuicidePredictor:
         
         # 복합 키워드 패턴 검사 (n-gram 패턴)
         phrase_patterns = [
-            (r"(want|wish) to (die|end|kill myself)", 30),  # 특정 표현 추가 점수
-            (r"plan to (suicide|kill myself|end my life)", 40),
-            (r"no (reason|point) (in|to) (living|life)", 25),
-            (r"can'?t (take|bear|handle) (it|this) anymore", 20)
+            (r"(want|wish|going) to (die|end|kill myself)", 30),  # 특정 표현 추가 점수
+            (r"plan(ning)? to (suicide|kill myself|end my life)", 40),
+            (r"no (reason|point|purpose) (in|to|for) (living|life)", 25),
+            (r"can'?t (take|bear|handle|stand) (it|this) anymore", 20),
+            (r"(considering|contemplating) (suicide|ending|taking) my life", 35),
+            (r"(made|written|prepared) (plans|notes|letters) (for|to|about) (suicide|death)", 40),
+            (r"(ending|taking) my (life|own life)", 35),
+            (r"don'?t want to (live|be alive|exist) (anymore|any longer)", 30),
+            (r"(better off|world better) without me", 25),
+            (r"(going to|will) (kill myself|end it all|end my life)", 40),
+            (r"(tired|exhausted|done) (of|with) (living|life|everything)", 20)
         ]
         
         pattern_score = 0
@@ -573,10 +698,17 @@ class SuicidePredictor:
         
         # 복합 키워드 패턴 검사
         phrase_patterns = [
-            (r"(want|wish) to (die|end|kill myself)", "High", "Want to die"),
-            (r"plan to (suicide|kill myself|end my life)", "High", "Suicide plan"),
-            (r"no (reason|point) (in|to) (living|life)", "Medium", "No reason to live"),
-            (r"can'?t (take|bear|handle) (it|this) anymore", "Medium", "Can't take it anymore")
+            (r"(want|wish|going) to (die|end|kill myself)", "High", "Want to die"),
+            (r"plan(ning)? to (suicide|kill myself|end my life)", "High", "Suicide plan"),
+            (r"no (reason|point|purpose) (in|to|for) (living|life)", "Medium", "No reason to live"),
+            (r"can'?t (take|bear|handle|stand) (it|this) anymore", "Medium", "Can't take it anymore"),
+            (r"(considering|contemplating) (suicide|ending|taking) my life", "High", "Considering suicide"),
+            (r"(made|written|prepared) (plans|notes|letters) (for|to|about) (suicide|death)", "High", "Suicide preparation"),
+            (r"(ending|taking) my (life|own life)", "High", "Ending my life"),
+            (r"don'?t want to (live|be alive|exist) (anymore|any longer)", "High", "Don't want to live"),
+            (r"(better off|world better) without me", "Medium", "World better without me"),
+            (r"(going to|will) (kill myself|end it all|end my life)", "High", "Will kill myself"),
+            (r"(tired|exhausted|done) (of|with) (living|life|everything)", "Medium", "Tired of living")
         ]
         
         for pattern, category, description in phrase_patterns:
@@ -599,6 +731,232 @@ class SuicidePredictor:
         else:
             return "none"
 
+    def train_from_large_csv(self, csv_filepath, chunk_size=10000, max_chunks=None):
+        """
+        Train suicide prediction model from a large CSV file by processing it in chunks.
+        
+        Parameters:
+        -----------
+        csv_filepath : str
+            Path to the CSV file
+        chunk_size : int, default=10000
+            Number of rows to process in each chunk
+        max_chunks : int, default=None
+            Maximum number of chunks to process (None = process all)
+            
+        Returns:
+        --------
+        bool
+            True if training was successful, False otherwise
+        """
+        try:
+            logger.info(f"Training model from large CSV file in chunks: {csv_filepath}")
+            
+            # Initialize reader for chunked processing
+            chunks_processed = 0
+            total_rows_processed = 0
+            
+            # Prepare vectorizer and classifier
+            vectorizer = TfidfVectorizer(max_features=5000)
+            classifier = LogisticRegression(max_iter=1000, warm_start=True)
+            
+            # Variables to collect data for keyword extraction
+            all_suicide_texts = []
+            first_chunk = True
+            X_all = None
+            y_all = None
+            
+            # Process file in chunks
+            for chunk_num, chunk in enumerate(pd.read_csv(csv_filepath, chunksize=chunk_size, 
+                                                        encoding='utf-8', on_bad_lines='skip')):
+                
+                if max_chunks is not None and chunk_num >= max_chunks:
+                    logger.info(f"Reached maximum number of chunks ({max_chunks}), stopping")
+                    break
+                
+                logger.info(f"Processing chunk {chunk_num+1} with {len(chunk)} rows")
+                
+                # Check if the dataframe has at least 2 columns (text and label)
+                if len(chunk.columns) < 2:
+                    logger.warning(f"CSV file needs at least 2 columns (current: {len(chunk.columns)})")
+                    continue
+                
+                # The structure is likely a bit different - check if we have an index column
+                if 'text' in chunk.columns and 'class' in chunk.columns:
+                    # Standard format with text and class columns
+                    text_col = 'text'
+                    label_col = 'class'
+                else:
+                    # Try to guess - first non-index column is typically text, second is label
+                    cols = [col for col in chunk.columns if col.lower() != 'unnamed: 0']
+                    if len(cols) >= 2:
+                        text_col = cols[0]
+                        label_col = cols[1]
+                    else:
+                        text_col = chunk.columns[0]  # First column is typically text
+                        label_col = chunk.columns[1]  # Second column is typically label
+                
+                logger.info(f"Using columns - Text: {text_col}, Label: {label_col}")
+                
+                # Clean data: Ensure text column contains strings and handle missing values
+                chunk[text_col] = chunk[text_col].astype(str)
+                chunk[text_col] = chunk[text_col].fillna('')
+                
+                # Prepare data for model training
+                X = chunk[text_col].values
+                
+                # Convert labels to binary
+                if pd.api.types.is_numeric_dtype(chunk[label_col]):
+                    # Numeric labels
+                    y = chunk[label_col].values
+                else:
+                    # String labels - convert 'suicide', 'yes', 'true', etc. to 1, others to 0
+                    suicide_keywords = ['suicide', 'suicidal', 'yes', 'positive', '1', 'true']
+                    y = np.array([1 if str(label).lower() in suicide_keywords else 0 
+                                for label in chunk[label_col]])
+                
+                # Log label distribution to debug
+                unique_labels, counts = np.unique(y, return_counts=True)
+                logger.info(f"Label distribution in chunk {chunk_num+1}: {dict(zip(unique_labels, counts))}")
+                
+                if first_chunk:
+                    # For the first chunk, just accumulate the data
+                    logger.info("First chunk: collecting data for initial training")
+                    X_all = X
+                    y_all = y
+                    first_chunk = False
+                else:
+                    # For subsequent chunks, stack with existing data
+                    X_all = np.concatenate((X_all, X))
+                    y_all = np.concatenate((y_all, y))
+                
+                # Collect suicide-related texts for keyword extraction (limited to first few chunks)
+                if chunk_num < 5:  # Limit to first 5 chunks to avoid memory issues
+                    if pd.api.types.is_numeric_dtype(chunk[label_col]):
+                        suicide_mask = chunk[label_col] == 1
+                    else:
+                        suicide_mask = chunk[label_col].str.lower().isin(suicide_keywords)
+                    
+                    suicide_texts = chunk.loc[suicide_mask, text_col].tolist()
+                    logger.info(f"Collected {len(suicide_texts)} suicide texts from chunk {chunk_num+1}")
+                    all_suicide_texts.extend(suicide_texts)
+                
+                chunks_processed += 1
+                total_rows_processed += len(chunk)
+                logger.info(f"Processed {total_rows_processed} rows so far")
+            
+            if chunks_processed == 0:
+                logger.error("No chunks were processed successfully")
+                return False
+            
+            # Check if we have both classes in the data
+            unique_labels = np.unique(y_all)
+            if len(unique_labels) < 2:
+                logger.warning(f"Data contains only one class: {unique_labels}. Need at least two classes for training.")
+                if all_suicide_texts:
+                    logger.info(f"However, we collected {len(all_suicide_texts)} suicide texts for keyword extraction")
+                    # Extract keywords from collected suicide texts
+                    logger.info(f"Extracting keywords from {len(all_suicide_texts)} suicide texts")
+                    self._extract_keywords_from_texts(all_suicide_texts)
+                    logger.info("Keyword extraction completed successfully")
+                    return True
+                else:
+                    logger.error("No suicide texts collected for keyword extraction")
+                    return False
+            
+            # Train on all collected data at once to ensure proper fitting
+            logger.info(f"Training model on {len(X_all)} samples...")
+            logger.info(f"Label distribution in all data: {dict(zip(*np.unique(y_all, return_counts=True)))}")
+            
+            # Transform collected text data
+            X_transformed = vectorizer.fit_transform(X_all)
+            
+            # Train classifier on all data
+            classifier.fit(X_transformed, y_all)
+            
+            # Save the model components
+            self.vectorizer = vectorizer
+            self.model = classifier
+            
+            # Create directory if it doesn't exist
+            os.makedirs(os.path.dirname(self.model_path), exist_ok=True)
+            
+            # Save model to disk
+            model_data = {
+                'vectorizer': vectorizer,
+                'classifier': classifier
+            }
+            joblib.dump(model_data, self.model_path)
+            logger.info(f"Model saved to {self.model_path}")
+            
+            # Extract keywords from collected suicide texts
+            if all_suicide_texts:
+                logger.info(f"Extracting keywords from {len(all_suicide_texts)} collected suicide texts")
+                self._extract_keywords_from_texts(all_suicide_texts)
+            else:
+                logger.warning("No suicide texts collected for keyword extraction, using defaults")
+                self._set_default_keywords()
+            
+            logger.info(f"Model training completed with {chunks_processed} chunks ({total_rows_processed} rows)")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during chunked model training: {str(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+    
+    def _extract_keywords_from_texts(self, suicide_texts):
+        """Extract keywords from a list of suicide-related texts"""
+        try:
+            logger.info(f"Extracting keywords from {len(suicide_texts)} texts")
+            
+            if len(suicide_texts) == 0:
+                logger.warning("No suicide-related texts provided for keyword extraction")
+                self._set_default_keywords()
+                return False
+            
+            # Use TF-IDF to extract keywords
+            vectorizer = TfidfVectorizer(max_features=100, stop_words='english')
+            tfidf_matrix = vectorizer.fit_transform(suicide_texts)
+            feature_names = vectorizer.get_feature_names_out()
+            
+            # Calculate average TF-IDF score for each keyword
+            avg_scores = tfidf_matrix.mean(axis=0).A1
+            
+            # Sort keywords by score
+            keywords_with_scores = list(zip(feature_names, avg_scores))
+            keywords_with_scores.sort(key=lambda x: x[1], reverse=True)
+            
+            # Categorize keywords into high, medium, low based on scores
+            total_keywords = len(keywords_with_scores)
+            high_count = max(10, total_keywords // 3)
+            medium_count = max(20, total_keywords // 3)
+            
+            self.keywords = {
+                "high": [kw for kw, _ in keywords_with_scores[:high_count]],
+                "medium": [kw for kw, _ in keywords_with_scores[high_count:high_count+medium_count]],
+                "low": [kw for kw, _ in keywords_with_scores[high_count+medium_count:]]
+            }
+            
+            # Add default high-risk keywords to ensure critical terms are included
+            self._add_default_keywords()
+            
+            # Log some examples from each category
+            logger.info(f"High risk keywords ({len(self.keywords['high'])}): " + 
+                      ', '.join(self.keywords['high'][:10]))
+            logger.info(f"Medium risk keywords ({len(self.keywords['medium'])}): " + 
+                      ', '.join(self.keywords['medium'][:10]))
+            logger.info(f"Low risk keywords ({len(self.keywords['low'])}): " + 
+                      ', '.join(self.keywords['low'][:10]))
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error during keyword extraction from texts: {str(e)}")
+            self._set_default_keywords()
+            return False
+
 # 테스트 코드
 if __name__ == "__main__":
     predictor = SuicidePredictor()
@@ -610,39 +968,60 @@ if __name__ == "__main__":
         compressed_csv_path = 'Suicide_Detection.csv.gz'
         full_csv_path = 'Suicide_Detection.csv'
         
-        if os.path.exists(sample_csv_path):
-            logger.info(f"Using sample CSV file: {sample_csv_path}")
-            csv_path = sample_csv_path
-            df = pd.read_csv(csv_path)
+        if os.path.exists(full_csv_path):
+            logger.info(f"Using full CSV file with chunked processing: {full_csv_path}")
+            predictor.train_from_large_csv(full_csv_path, chunk_size=10000)
         elif os.path.exists(compressed_csv_path):
             logger.info(f"Using compressed CSV file: {compressed_csv_path}")
             # 압축 파일 읽기
             with gzip.open(compressed_csv_path, 'rt') as f:
                 df = pd.read_csv(f)
             csv_path = None  # df를 직접 전달하기 위해 경로는 None으로 설정
-        elif os.path.exists(full_csv_path):
-            logger.info(f"Using full CSV file: {full_csv_path}")
-            csv_path = full_csv_path
-            df = pd.read_csv(csv_path)
-        else:
-            raise FileNotFoundError("No suicide detection CSV file found. Please provide either Suicide_Detection.csv, Suicide_Detection.csv.gz, or Suicide_Detection_sample.csv")
-        
-        # csv_path가 있으면 경로로 학습, 없으면 df로 학습
-        if csv_path:
-            predictor.train_from_csv(csv_path)
-        else:
-            # train 메소드를 DataFrame을 직접 받을 수 있도록 수정 필요
-            # 임시로 DataFrame을 CSV로 저장하고 사용
             temp_csv_path = 'temp_data.csv'
             df.to_csv(temp_csv_path, index=False)
             predictor.train_from_csv(temp_csv_path)
             # 임시 파일 삭제
             if os.path.exists(temp_csv_path):
                 os.remove(temp_csv_path)
+        elif os.path.exists(sample_csv_path):
+            logger.info(f"Using sample CSV file: {sample_csv_path}")
+            csv_path = sample_csv_path
+            predictor.train_from_csv(csv_path)
+        else:
+            raise FileNotFoundError("No suicide detection CSV file found. Please provide either Suicide_Detection.csv, Suicide_Detection.csv.gz, or Suicide_Detection_sample.csv")
         
     # 테스트 텍스트로 예측
     test_text = "I don't want to live anymore. Everything feels so hopeless."
     result = predictor.predict(test_text)
     print(f"Risk level: {result['risk_level']}")
     print(f"Risk score: {result['risk_score']}")
-    print(f"Keywords found: {result['keywords_found']}") 
+    print(f"Keywords found: {result['keywords_found']}")
+
+    # Add new keywords
+    predictor.high_risk_keywords = [
+        "suicide", "kill myself", "end my life", "take my life", 
+        "want to die", "overdose", "jump", "hang myself", "shoot myself",
+        "self-harm", "slit wrists", "noose", "suicidal thoughts", 
+        "better off dead", "not worth living", "die soon", "suicidal ideation",
+        "lethal", "razor", "gun", "pills", "fatal", "suicide note", "final goodbye",
+        "want to end it all", "take my own life", "end it all", "last day",
+        "life insurance", "will and testament", "sleeping pills", "painless death"
+    ]
+    predictor.medium_risk_keywords = [
+        "hopeless", "worthless", "helpless", "depressed", "miserable", 
+        "suffering", "can't go on", "tired of life", "burden to others", 
+        "no purpose", "no meaning", "no hope", "no future", "darkness",
+        "unbearable pain", "emptiness", "nothingness", "despair", "trapped", 
+        "agony", "anguish", "torment", "exhausted", "meaningless", "pointless", 
+        "alone", "lonely", "isolated", "abandoned", "rejected", 
+        "giving up", "can't cope", "too much pain", "endless suffering"
+    ]
+    predictor.low_risk_keywords = [
+        "sad", "upset", "unhappy", "frustrated", "disappointed", 
+        "tired", "exhausted", "hurt", "pain", "dissatisfied", 
+        "unfulfilled", "discouraged", "disheartened", "dejected", 
+        "heartbroken", "defeated", "fatigued", "weary", "drained", 
+        "spent", "troubled", "distressed", "blue", "down", "gloomy",
+        "sorrowful", "tearful", "confused", "lost", "struggling",
+        "empty", "numb", "anxiety", "worry", "stressed"
+    ] 
