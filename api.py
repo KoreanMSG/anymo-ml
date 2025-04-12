@@ -430,20 +430,34 @@ def start_server():
     logger.info(f"Environment: {os.getenv('ENVIRONMENT', 'development')}")
     logger.info(f"Port: {port}")
     logger.info(f"Current directory: {os.getcwd()}")
-    logger.info(f"Files in current directory: {', '.join(os.listdir('.'))}")
     
-    # Log model and data status
-    logger.info(f"Models directory exists: {os.path.exists(MODELS_DIR)}")
-    logger.info(f"Data directory exists: {os.path.exists(DATA_DIR)}")
-    
-    # Directly pass FastAPI app to Uvicorn
-    # Using host 0.0.0.0 to listen on all available network interfaces (required for Render)
-    uvicorn.run(
-        app,
-        host="0.0.0.0",
-        port=port,
-        log_level="info"
-    )
+    try:
+        # Log environment information
+        logger.info(f"Files in current directory: {', '.join(os.listdir('.'))}")
+        logger.info(f"Models directory exists: {os.path.exists(MODELS_DIR)}")
+        logger.info(f"Data directory exists: {os.path.exists(DATA_DIR)}")
+        
+        # Check if python-multipart is installed
+        try:
+            import multipart
+            logger.info(f"python-multipart is installed: version {getattr(multipart, '__version__', 'unknown')}")
+        except ImportError:
+            logger.warning("python-multipart is not installed. Form processing may not work.")
+        
+        # Directly pass FastAPI app to Uvicorn
+        # Using host 0.0.0.0 to listen on all available network interfaces (required for Render)
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=port,
+            log_level="info"
+        )
+    except Exception as e:
+        logger.error(f"Server startup error: {e}")
+        logger.error(traceback.format_exc())
+        # Don't exit - let the system handle it
+        # This helps in containerized environments
+        raise
 
 @app.get("/load-full-model", response_model=dict)
 async def load_full_model():
