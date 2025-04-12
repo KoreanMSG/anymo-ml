@@ -141,12 +141,21 @@ class SuicidePredictor:
         try:
             # CSV 파일 로드 (on_bad_lines='skip' to handle parsing errors)
             try:
-                df = pd.read_csv(csv_path, on_bad_lines='skip')
+                # First try with more lenient parsing
+                df = pd.read_csv(csv_path, on_bad_lines='skip', quoting=pd.io.common.csv.QUOTE_MINIMAL, 
+                                engine='python', encoding='utf-8', error_bad_lines=False)
                 logger.info(f"Successfully loaded CSV file with {len(df)} rows after skipping bad lines")
-            except TypeError:
-                # Fallback for older pandas versions that don't support on_bad_lines
-                df = pd.read_csv(csv_path, error_bad_lines=False)
-                logger.info(f"Successfully loaded CSV file with {len(df)} rows after skipping bad lines")
+            except Exception as inner_e:
+                logger.warning(f"First CSV parsing attempt failed: {inner_e}, trying alternative method")
+                try:
+                    # Try with C engine but with minimal quoting
+                    df = pd.read_csv(csv_path, quoting=pd.io.common.csv.QUOTE_MINIMAL, encoding='utf-8')
+                except Exception as inner_e2:
+                    logger.warning(f"Second CSV parsing attempt failed: {inner_e2}, trying final method")
+                    # Last resort - try to read with Python engine and no quoting
+                    df = pd.read_csv(csv_path, quoting=pd.io.common.csv.QUOTE_NONE, encoding='utf-8', engine='python')
+            
+            logger.info(f"Loaded CSV with {len(df)} rows and {len(df.columns)} columns")
             
             # 최소 2개 이상의 열이 있는지 확인 (텍스트, 라벨)
             if len(df.columns) < 2:
@@ -214,9 +223,9 @@ class SuicidePredictor:
                 self._add_default_keywords()
             
             logger.info(f"키워드 추출 완료: 고위험 {len(self.keywords['high'])}개, 중위험 {len(self.keywords['medium'])}개, 저위험 {len(self.keywords['low'])}개")
-            print(f"고위험 키워드 예시: {self.keywords['high'][:5]}")
-            print(f"중위험 키워드 예시: {self.keywords['medium'][:5]}")
-            print(f"저위험 키워드 예시: {self.keywords['low'][:5]}")
+            logger.info(f"고위험 키워드 예시: {self.keywords['high'][:5]}")
+            logger.info(f"중위험 키워드 예시: {self.keywords['medium'][:5]}")
+            logger.info(f"저위험 키워드 예시: {self.keywords['low'][:5]}")
             
             return True
             
@@ -275,12 +284,19 @@ class SuicidePredictor:
             
             # 데이터 로드 (with error handling)
             try:
-                df = pd.read_csv(csv_path, on_bad_lines='skip')
+                # First try with more lenient parsing
+                df = pd.read_csv(csv_path, on_bad_lines='skip', quoting=pd.io.common.csv.QUOTE_MINIMAL, 
+                                engine='python', encoding='utf-8', error_bad_lines=False)
                 logger.info(f"For training, loaded CSV with {len(df)} rows after skipping bad lines")
-            except TypeError:
-                # Fallback for older pandas versions
-                df = pd.read_csv(csv_path, error_bad_lines=False)
-                logger.info(f"For training, loaded CSV with {len(df)} rows after skipping bad lines")
+            except Exception as inner_e:
+                logger.warning(f"First CSV parsing attempt failed: {inner_e}, trying alternative method")
+                try:
+                    # Try with C engine but with minimal quoting
+                    df = pd.read_csv(csv_path, quoting=pd.io.common.csv.QUOTE_MINIMAL, encoding='utf-8')
+                except Exception as inner_e2:
+                    logger.warning(f"Second CSV parsing attempt failed: {inner_e2}, trying final method")
+                    # Last resort - try to read with Python engine and no quoting
+                    df = pd.read_csv(csv_path, quoting=pd.io.common.csv.QUOTE_NONE, encoding='utf-8', engine='python')
             
             # 데이터 구조 확인
             if len(df.columns) >= 2:

@@ -48,28 +48,29 @@ def create_sample_csv():
     if not os.path.exists(sample_file_path):
         logger.info("Creating sample CSV file for keyword extraction")
         try:
-            with open(sample_file_path, 'w') as f:
+            with open(sample_file_path, 'w', encoding='utf-8') as f:
+                # Simple CSV format with properly escaped quotes
                 f.write('''text,class
-"I feel so hopeless and worthless, I just want to end it all.",1
-"I can't see a reason to continue living anymore. The pain is too much.",1
-"I've been thinking about killing myself a lot lately.",1
-"Sometimes I feel like everyone would be better off if I wasn't here.",1
-"I wish I could just go to sleep and never wake up.",1
-"I'm tired of living with this pain every day.",1
-"I don't see a future for myself. I just want it to end.",1
-"There's no point in living anymore.",1
-"I've been researching ways to commit suicide.",1
-"I feel like a burden to everyone around me.",1
-"I had a great day today! Everything is going well.",0
-"Just finished a new book, it was really inspiring.",0
-"Looking forward to the weekend and seeing friends.",0
-"I'm excited about my new job opportunity.",0
-"The weather is beautiful today, perfect for a walk.",0
-"Just adopted a new puppy, so happy!",0
-"Had a wonderful dinner with my family tonight.",0
-"Working on a new project that's really challenging but fun.",0
-"I'm grateful for all the support from my friends lately.",0
-"Just got back from an amazing vacation.",0''')
+"I feel so hopeless and worthless I just want to end it all",1
+"I cant see a reason to continue living anymore. The pain is too much",1
+"I have been thinking about killing myself a lot lately",1
+"Sometimes I feel like everyone would be better off if I wasnt here",1
+"I wish I could just go to sleep and never wake up",1
+"I am tired of living with this pain every day",1
+"I dont see a future for myself. I just want it to end",1
+"There is no point in living anymore",1
+"I have been researching ways to commit suicide",1
+"I feel like a burden to everyone around me",1
+"I had a great day today! Everything is going well",0
+"Just finished a new book it was really inspiring",0
+"Looking forward to the weekend and seeing friends",0
+"I am excited about my new job opportunity",0
+"The weather is beautiful today perfect for a walk",0
+"Just adopted a new puppy so happy",0
+"Had a wonderful dinner with my family tonight",0
+"Working on a new project that is really challenging but fun",0
+"I am grateful for all the support from my friends lately",0
+"Just got back from an amazing vacation",0''')
             logger.info(f"Sample CSV file created at {sample_file_path}")
             return True
         except Exception as e:
@@ -92,7 +93,16 @@ async def lifespan(app: FastAPI):
     extract_data_dir = os.path.join(DATA_DIR, "Suicide_Detection_sample.csv")
     if os.path.exists(extract_data_dir):
         logger.info("CSV 데이터에서 키워드 추출 시작")
-        suicide_predictor.extract_keywords_from_csv(extract_data_dir)
+        success = suicide_predictor.extract_keywords_from_csv(extract_data_dir)
+        
+        # If extraction failed, recreate the CSV file and try again
+        if not success:
+            logger.warning("CSV 파일 추출 실패, 새로운 샘플 CSV 파일 생성")
+            os.remove(extract_data_dir)
+            create_sample_csv()
+            if os.path.exists(extract_data_dir):
+                logger.info("새 CSV 파일로 다시 추출 시도")
+                suicide_predictor.extract_keywords_from_csv(extract_data_dir)
     else:
         logger.warning("키워드 추출용 CSV 파일이 없습니다. 기본 키워드를 사용합니다.")
         
